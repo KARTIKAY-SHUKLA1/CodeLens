@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 const passport = require('passport');
 const session = require('express-session');
 const { createClient } = require('@supabase/supabase-js');
+const path = require('path');
 
 const app = express();
 
