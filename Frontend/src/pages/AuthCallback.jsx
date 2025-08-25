@@ -1,3 +1,4 @@
+import { API_ENDPOINTS } from "../config/api";
 import React, { useEffect, useState } from 'react';
 
 const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
@@ -25,7 +26,7 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
         setStatus('authenticating');
 
         // Send the code to your backend
-        const response = await fetch('https://codelens-backend-0xl0.onrender.com/api/auth/github/callback', {
+        const response = await fetch(`${API_ENDPOINTS.GITHUB_CALLBACK}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
