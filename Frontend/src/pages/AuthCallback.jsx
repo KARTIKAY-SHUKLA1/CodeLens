@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import LoadingSpinner from '../components/LoadingSpinner';
 
 const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
   const [status, setStatus] = useState('processing');
@@ -79,6 +78,13 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
 
     handleCallback();
   }, [onNavigate, onAuthSuccess]);
+
+  // Simple CSS loading spinner
+  const LoadingSpinner = () => (
+    <div className="flex justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+  );
 
   const renderContent = () => {
     switch (status) {
