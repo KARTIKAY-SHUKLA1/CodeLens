@@ -22,8 +22,16 @@ const updateProfileSchema = Joi.object({
   blog: Joi.string().uri().max(255).optional().allow('')
 });
 
+const preferencesSchema = Joi.object({
+  primaryLanguages: Joi.array().items(Joi.string()).optional(),
+  codeStyle: Joi.string().valid('readable', 'compact', 'performant').optional(),
+  reviewFocus: Joi.string().valid('bugs', 'performance', 'style', 'security').optional(),
+  experienceLevel: Joi.string().valid('beginner', 'intermediate', 'advanced').optional(),
+  goals: Joi.array().items(Joi.string()).optional()
+});
+
 // @route   GET /api/users/profile
-// @desc    Get user profile
+// @desc    Get user profile (Updated to match frontend expectations)
 // @access  Private
 router.get('/profile', async (req, res) => {
   try {
@@ -32,7 +40,7 @@ router.get('/profile', async (req, res) => {
       .select(`
         id, username, name, email, avatar_url, bio, 
         github_profile_url, plan, credits_used, credits_limit,
-        created_at, last_login
+        created_at, last_login, preferences
       `)
       .eq('id', req.user.id)
       .single();
@@ -71,9 +79,23 @@ router.get('/profile', async (req, res) => {
       .slice(0, 5)
       .map(([lang, count]) => ({ language: lang, count }));
 
+    // Format response to match frontend expectations
+    const formattedUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar_url,
+      githubUsername: user.username,
+      plan: user.plan,
+      reviewsUsed: user.credits_used,
+      reviewsLimit: user.credits_limit,
+      isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
+      preferences: user.preferences
+    };
+
     res.json({
       success: true,
-      user: user,
+      user: formattedUser,
       statistics: {
         totalReviews,
         completedReviews,
@@ -88,6 +110,62 @@ router.get('/profile', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get user profile'
+    });
+  }
+});
+
+// @route   POST /api/users/preferences (NEW - Required by frontend)
+// @desc    Save user preferences from onboarding
+// @access  Private
+router.post('/preferences', async (req, res) => {
+  try {
+    const { error: validationError, value } = preferencesSchema.validate(req.body);
+    
+    if (validationError) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid preferences data',
+        errors: validationError.details.map(d => d.message)
+      });
+    }
+
+    // Update user preferences and mark as no longer new user
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({
+        preferences: value,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', req.user.id)
+      .select('id, username, name, email, avatar_url, plan, credits_used, credits_limit, preferences')
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      message: 'Preferences saved successfully',
+      user: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        avatar: updatedUser.avatar_url,
+        githubUsername: updatedUser.username,
+        plan: updatedUser.plan,
+        reviewsUsed: updatedUser.credits_used,
+        reviewsLimit: updatedUser.credits_limit,
+        isNewUser: false,
+        preferences: updatedUser.preferences
+      }
+    });
+
+  } catch (error) {
+    console.error('Save preferences error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save preferences'
     });
   }
 });

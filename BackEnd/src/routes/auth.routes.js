@@ -31,7 +31,7 @@ router.get('/github', passport.authenticate('github', {
   scope: ['user:email', 'read:user'] 
 }));
 
-// @route   GET /api/auth/github/callback
+// @route   GET /api/auth/github/callback (Original OAuth callback)
 // @desc    GitHub OAuth callback
 // @access  Public
 router.get('/github/callback',
@@ -59,10 +59,12 @@ router.get('/github/callback',
         username: req.user.username,
         name: req.user.name,
         email: req.user.email,
-        avatar_url: req.user.avatar_url,
+        avatar: req.user.avatar_url, // Note: renamed to 'avatar' for frontend
+        githubUsername: req.user.username,
         plan: req.user.plan,
-        credits_used: req.user.credits_used,
-        credits_limit: req.user.credits_limit
+        reviewsUsed: req.user.credits_used,
+        reviewsLimit: req.user.credits_limit,
+        isNewUser: req.user.created_at && new Date(req.user.created_at) > new Date(Date.now() - 24*60*60*1000) // New if created within 24 hours
       }))}`;
 
       res.redirect(redirectURL);
@@ -73,6 +75,142 @@ router.get('/github/callback',
     }
   }
 );
+
+// @route   POST /api/auth/github/callback (For frontend handleAuthCallback)
+// @desc    Handle GitHub OAuth code from frontend
+// @access  Public
+router.post('/github/callback', async (req, res) => {
+  try {
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: 'Authorization code is required'
+      });
+    }
+
+    // Exchange code for access token with GitHub
+    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code: code,
+      }),
+    });
+
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.error || !tokenData.access_token) {
+      throw new Error('Failed to get access token');
+    }
+
+    // Get user info from GitHub
+    const userResponse = await fetch('https://api.github.com/user', {
+      headers: {
+        'Authorization': `token ${tokenData.access_token}`,
+        'User-Agent': 'CodeLens-App',
+      },
+    });
+
+    const githubUser = await userResponse.json();
+
+    // Get user email if not public
+    const emailResponse = await fetch('https://api.github.com/user/emails', {
+      headers: {
+        'Authorization': `token ${tokenData.access_token}`,
+        'User-Agent': 'CodeLens-App',
+      },
+    });
+
+    const emails = await emailResponse.json();
+    const primaryEmail = emails.find(email => email.primary)?.email || githubUser.email;
+
+    // Create or update user in database
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('github_id', githubUser.id)
+      .single();
+
+    let user;
+    if (existingUser) {
+      // Update existing user
+      const { data: updatedUser } = await supabase
+        .from('users')
+        .update({
+          name: githubUser.name,
+          email: primaryEmail,
+          avatar_url: githubUser.avatar_url,
+          last_login: new Date().toISOString(),
+        })
+        .eq('id', existingUser.id)
+        .select()
+        .single();
+      user = updatedUser;
+    } else {
+      // Create new user
+      const { data: newUser } = await supabase
+        .from('users')
+        .insert({
+          github_id: githubUser.id,
+          username: githubUser.login,
+          name: githubUser.name,
+          email: primaryEmail,
+          avatar_url: githubUser.avatar_url,
+          plan: 'free',
+          credits_used: 0,
+          credits_limit: 10,
+        })
+        .select()
+        .single();
+      user = newUser;
+    }
+
+    // Generate JWT token
+    const token = generateToken(user);
+
+    // Create session record
+    await supabase
+      .from('user_sessions')
+      .insert([{
+        user_id: user.id,
+        session_token: token,
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        ip_address: req.ip,
+        user_agent: req.get('user-agent')
+      }]);
+
+    // Return token and user data to frontend
+    res.json({
+      success: true,
+      token: token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar_url,
+        githubUsername: user.username,
+        plan: user.plan,
+        reviewsUsed: user.credits_used,
+        reviewsLimit: user.credits_limit,
+        isNewUser: !existingUser
+      }
+    });
+
+  } catch (error) {
+    console.error('OAuth callback error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Authentication failed'
+    });
+  }
+});
 
 // @route   POST /api/auth/verify-token
 // @desc    Verify JWT token and return user info
@@ -157,7 +295,7 @@ router.post('/logout', async (req, res) => {
 });
 
 // @route   GET /api/auth/me
-// @desc    Get current user info
+// @desc    Get current user info (Original route - keeping for compatibility)
 // @access  Private
 router.get('/me', passport.authenticate('jwt', { session: false }), async (req, res) => {
   try {

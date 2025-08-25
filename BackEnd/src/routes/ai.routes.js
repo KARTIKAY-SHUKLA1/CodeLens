@@ -1,4 +1,4 @@
-// src/routes/ai.routes.js
+// src/routes/ai.routes.js - FIXED VERSION
 const express = require('express');
 const passport = require('passport');
 const aiService = require('../services/ai.service');
@@ -6,15 +6,15 @@ const { createClient } = require('@supabase/supabase-js');
 
 const router = express.Router();
 
-// Validate environment variables
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
-  throw new Error('Missing required Supabase environment variables: SUPABASE_URL and SUPABASE_ANON_KEY');
+// Validate environment variables - FIXED TO USE SERVICE_KEY
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+  throw new Error('Missing required Supabase environment variables: SUPABASE_URL and SUPABASE_SERVICE_KEY');
 }
 
-// Initialize Supabase
+// Initialize Supabase - FIXED TO USE SERVICE_KEY
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_KEY
 );
 
 // Language detection utility
@@ -506,6 +506,7 @@ router.get('/test-env', (req, res) => {
   res.json({
     hasGeminiKey: !!process.env.GOOGLE_GEMINI_KEY,
     hasSupabaseUrl: !!process.env.SUPABASE_URL,
+    hasSupabaseServiceKey: !!process.env.SUPABASE_SERVICE_KEY,
     nodeEnv: process.env.NODE_ENV,
     corsOrigin: process.env.CORS_ORIGIN,
     port: process.env.PORT

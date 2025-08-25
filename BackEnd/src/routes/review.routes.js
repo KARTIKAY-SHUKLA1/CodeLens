@@ -30,6 +30,55 @@ const updateReviewSchema = Joi.object({
   is_favorite: Joi.boolean().optional()
 });
 
+// @route   POST /api/reviews/increment
+// @desc    Increment user's review usage count
+// @access  Private
+router.post('/increment', async (req, res) => {
+  try {
+    // Check user credits before incrementing
+    if (req.user.credits_used >= req.user.credits_limit) {
+      return res.status(403).json({
+        success: false,
+        message: 'Credit limit exceeded. Please upgrade your plan.',
+        credits: {
+          used: req.user.credits_used,
+          limit: req.user.credits_limit
+        }
+      });
+    }
+
+    // Increment user's credits_used
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ 
+        credits_used: req.user.credits_used + 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', req.user.id)
+      .select('credits_used, credits_limit')
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      message: 'Review usage incremented successfully',
+      reviewsUsed: updatedUser.credits_used,
+      reviewsLimit: updatedUser.credits_limit,
+      creditsRemaining: updatedUser.credits_limit - updatedUser.credits_used
+    });
+
+  } catch (error) {
+    console.error('Increment review usage error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update review usage'
+    });
+  }
+});
+
 // @route   GET /api/reviews
 // @desc    Get user's code reviews with pagination
 // @access  Private
