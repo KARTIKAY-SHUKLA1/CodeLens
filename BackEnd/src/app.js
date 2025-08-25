@@ -1,4 +1,4 @@
-// src/app.js (UPDATED VERSION WITH AUTH)
+// src/app.js (UPDATED VERSION WITH AUTH - API ONLY)
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -7,7 +7,6 @@ const rateLimit = require('express-rate-limit');
 const passport = require('passport');
 const session = require('express-session');
 const { createClient } = require('@supabase/supabase-js');
-const path = require('path');
 
 const app = express();
 
@@ -48,9 +47,13 @@ const aiLimiter = rateLimit({
   }
 });
 
-// CORS configuration
+// CORS configuration - Updated for production
+const corsOrigins = process.env.NODE_ENV === 'production' 
+  ? [process.env.CORS_ORIGIN, 'https://your-frontend-domain.com'] // Add your actual frontend domain
+  : ['http://localhost:3000', 'http://localhost:3001'];
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -82,13 +85,35 @@ app.use(passport.session());
 // Import and configure Passport strategies
 require('./config/passport')(passport);
 
+// Root endpoint - API info
+app.get('/', (req, res) => {
+  res.json({
+    name: 'CodeLens API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: [
+      'GET /health - Health check',
+      'POST /api/auth/* - Authentication routes',
+      'GET /api/users/* - User management',
+      'POST /api/ai/* - AI code analysis',
+      'GET /api/reviews/* - Review management'
+    ],
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    services: {
+      database: process.env.SUPABASE_URL ? 'connected' : 'not configured',
+      ai: process.env.GOOGLE_GEMINI_KEY ? 'configured' : 'not configured',
+      github: process.env.GITHUB_CLIENT_ID ? 'configured' : 'not configured'
+    }
   });
 });
 
@@ -98,20 +123,25 @@ app.use('/api/users', require('./routes/user.routes'));
 app.use('/api/ai', aiLimiter, require('./routes/ai.routes'));
 app.use('/api/reviews', require('./routes/review.routes'));
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static('public'));
-  
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// API 404 handler - Only for API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    error: 'API endpoint not found',
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+    availableEndpoints: ['/api/auth', '/api/users', '/api/ai', '/api/reviews']
   });
-}
+});
 
-// 404 handler
+// Catch-all for non-API routes
 app.use('*', (req, res) => {
   res.status(404).json({
-    error: 'Endpoint not found',
-    message: `Cannot ${req.method} ${req.originalUrl}`
+    error: 'Not Found',
+    message: 'This is an API server. Frontend should be deployed separately.',
+    api: {
+      base: '/api',
+      health: '/health',
+      docs: 'Available endpoints listed at root /'
+    }
   });
 });
 
