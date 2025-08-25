@@ -6,16 +6,16 @@ const getApiBaseUrl = () => {
   // If running in development
   if (process.env.NODE_ENV === 'development') {
     // Check if custom API URL is set in environment
-    if (process.env.REACT_APP_API_URL) {
-      return process.env.REACT_APP_API_URL;
-    }
+    if (import.meta.env.VITE_API_URL) {
+  return import.meta.env.VITE_API_URL;
+}
     // Default to localhost for development
     return 'http://localhost:5000';
   }
 
   // Production - use your deployed backend URL
   // You'll replace this with your actual Render backend URL
-  return process.env.REACT_APP_API_URL || 'https://your-backend-app.onrender.com';
+  return import.meta.env.VITE_API_URL || 'https://codelens-backend-0xl0.onrender.com';
 };
 
 // Create the API configuration

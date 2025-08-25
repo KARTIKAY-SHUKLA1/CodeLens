@@ -47,10 +47,12 @@ const aiLimiter = rateLimit({
   }
 });
 
-// CORS configuration - Updated for production
-const corsOrigins = process.env.NODE_ENV === 'production' 
-  ? [process.env.CORS_ORIGIN, 'https://your-frontend-domain.com'] // Add your actual frontend domain
-  : ['http://localhost:3000', 'http://localhost:3001'];
+  const corsOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+      process.env.CORS_ORIGIN, 
+      'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app'
+    ].filter(Boolean) // Remove undefined values
+  : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
 
 app.use(cors({
   origin: corsOrigins,

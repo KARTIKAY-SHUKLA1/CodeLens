@@ -7,7 +7,7 @@ function useAuth() {
   const [showWelcome, setShowWelcome] = useState(false);
 
   // Your deployed backend API base URL
-  const API_BASE_URL = 'https://codelens-backend-0xl0.onrender.com/api';
+  const API_BASE_URL = import.meta.env.VITE_API_URL + '/api' || 'https://codelens-backend-0xl0.onrender.com/api';
 
   // Check if user is already authenticated on app load
   useEffect(() => {
