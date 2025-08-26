@@ -17,7 +17,7 @@ module.exports = function(passport) {
     clientID: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.NODE_ENV === 'production' 
-  ? `${process.env.CORS_ORIGIN}/api/auth/github/callback`
+  ? "https://codelens-backend-0xl0.onrender.com/api/auth/github/callback"
   : "/api/auth/github/callback"
   },
   async (accessToken, refreshToken, profile, done) => {
