@@ -16,19 +16,55 @@ import AuthCallback from './pages/AuthCallback';
 export default function CodeLensApp() {
   const [currentPage, setCurrentPage] = useState('home');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const { user, signIn, signOut, isLoading, showWelcome, setShowWelcome, handleWelcomeComplete } = useAuth();
+  const { user, signIn, signOut, isLoading, showWelcome, setShowWelcome, handleWelcomeComplete, refreshUser } = useAuth();
 
-  // Check for OAuth callback on app load
+  // Check for OAuth callback or token on app load
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
-    const state = urlParams.get('state');
+    const token = urlParams.get('token');
+    const userParam = urlParams.get('user');
+    const error = urlParams.get('error');
     
-    // If we have OAuth parameters, show the callback page
-    if (code || state) {
+    // Handle error from OAuth
+    if (error) {
+      console.error('OAuth Error:', error);
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
+    
+    // Handle token from backend redirect (GitHub OAuth success)
+    if (token && userParam) {
+      try {
+        const userData = JSON.parse(decodeURIComponent(userParam));
+        localStorage.setItem('auth_token', token);
+        localStorage.setItem('user_data', JSON.stringify(userData));
+        
+        // Refresh user state in useAuth hook
+        refreshUser();
+        
+        // Show welcome modal for new users
+        if (userData.isNewUser) {
+          setShowWelcome(true);
+        }
+        
+        // Navigate to dashboard
+        setCurrentPage('dashboard');
+        
+        // Clean up URL params
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (error) {
+        console.error('Failed to process auth token:', error);
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+    // Handle OAuth code (if you still want to support the frontend flow)
+    else if (code) {
       setCurrentPage('auth-callback');
     }
-  }, []);
+  }, [refreshUser, setShowWelcome]);
 
   const handleNavigate = (page) => {
     setCurrentPage(page);
@@ -36,10 +72,9 @@ export default function CodeLensApp() {
   };
 
   const handleAuthSuccess = (userData) => {
-    // After successful auth, the localStorage is already set by AuthCallback
-    // We can trigger a page refresh or manually update the user state
-    // For now, let's just let the useAuth hook detect the change
     console.log('Auth successful for user:', userData);
+    // Refresh user state
+    refreshUser();
   };
 
   const renderPage = () => {

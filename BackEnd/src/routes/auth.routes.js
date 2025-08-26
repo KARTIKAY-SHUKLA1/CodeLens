@@ -34,6 +34,7 @@ router.get('/github', passport.authenticate('github', {
 // @route   GET /api/auth/github/callback (Original OAuth callback)
 // @desc    GitHub OAuth callback
 // @access  Public
+// Update your GitHub OAuth callback route (around line 34-47)
 router.get('/github/callback',
   passport.authenticate('github', { failureRedirect: '/login' }),
   async (req, res) => {
@@ -52,26 +53,27 @@ router.get('/github/callback',
           user_agent: req.get('user-agent')
         }]);
 
-      // Redirect to frontend with token
+      // FIX: Redirect to frontend ROOT with token as query parameter
+      // Your frontend will detect the token and handle auth automatically
       const frontendURL = process.env.CORS_ORIGIN || 'http://localhost:3000';
-      const redirectURL = `${frontendURL}/auth/callback?token=${token}&user=${encodeURIComponent(JSON.stringify({
+      const redirectURL = `${frontendURL}/?token=${token}&user=${encodeURIComponent(JSON.stringify({
         id: req.user.id,
         username: req.user.username,
         name: req.user.name,
         email: req.user.email,
-        avatar: req.user.avatar_url, // Note: renamed to 'avatar' for frontend
+        avatar: req.user.avatar_url,
         githubUsername: req.user.username,
         plan: req.user.plan,
         reviewsUsed: req.user.credits_used,
         reviewsLimit: req.user.credits_limit,
-        isNewUser: req.user.created_at && new Date(req.user.created_at) > new Date(Date.now() - 24*60*60*1000) // New if created within 24 hours
+        isNewUser: req.user.created_at && new Date(req.user.created_at) > new Date(Date.now() - 24*60*60*1000)
       }))}`;
 
       res.redirect(redirectURL);
     } catch (error) {
       console.error('OAuth callback error:', error);
       const frontendURL = process.env.CORS_ORIGIN || 'http://localhost:3000';
-      res.redirect(`${frontendURL}/auth/error?message=${encodeURIComponent('Authentication failed')}`);
+      res.redirect(`${frontendURL}/?error=${encodeURIComponent('Authentication failed')}`);
     }
   }
 );
