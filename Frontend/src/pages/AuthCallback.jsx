@@ -1,5 +1,5 @@
-import { API_ENDPOINTS } from "../config/api";
 import React, { useEffect, useState } from 'react';
+import { API_ENDPOINTS } from "../config/api";
 
 const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
   const [status, setStatus] = useState('processing');
@@ -12,68 +12,98 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
         const state = urlParams.get('state');
-        const error = urlParams.get('error');
+        const urlError = urlParams.get('error');
 
-        if (error) {
-          throw new Error(`OAuth Error: ${error}`);
+        if (urlError) {
+          throw new Error(`OAuth Error: ${urlError}`);
         }
 
         if (!code) {
-          throw new Error('Authorization code not found');
+          throw new Error('Authorization code not found in URL parameters');
         }
 
         console.log('Processing OAuth callback with code:', code);
         setStatus('authenticating');
 
-        // Send the code to your backend
-        const response = await fetch(`${API_ENDPOINTS.GITHUB_CALLBACK}`, {
+        // FIXED: Send the code to your backend using the correct endpoint
+        const response = await fetch(API_ENDPOINTS.GITHUB_CALLBACK, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             code,
-            state
+            ...(state && { state }) // Only include state if it exists
           })
         });
 
-        const data = await response.json();
-
+        // FIXED: Better error handling
         if (!response.ok) {
-          throw new Error(data.message || 'Authentication failed');
+          let errorMessage;
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.message || errorData.error || `HTTP ${response.status}`;
+          } catch (e) {
+            errorMessage = `Authentication failed with status ${response.status}`;
+          }
+          throw new Error(errorMessage);
         }
 
-        // Store the JWT token
-        if (data.token) {
-          localStorage.setItem('auth_token', data.token);
-          localStorage.setItem('user_data', JSON.stringify(data.user));
+        const data = await response.json();
+        console.log('Auth callback response:', data);
+
+        // FIXED: Validate response data
+        if (!data.token) {
+          throw new Error('No authentication token received from server');
         }
+
+        if (!data.user) {
+          throw new Error('No user data received from server');
+        }
+
+        // Store the JWT token and user data
+        localStorage.setItem('auth_token', data.token);
+        localStorage.setItem('user_data', JSON.stringify(data.user));
 
         setStatus('success');
         
-        // Call the auth success callback to refresh user state
+        // FIXED: Call the auth success callback to refresh user state
         if (onAuthSuccess) {
-          onAuthSuccess(data.user);
+          try {
+            await onAuthSuccess(data.user);
+          } catch (callbackError) {
+            console.warn('Auth success callback failed:', callbackError);
+            // Don't throw - auth was successful, just callback failed
+          }
         }
         
         // Redirect to dashboard after a brief delay
         setTimeout(() => {
-          onNavigate('dashboard');
+          if (onNavigate) {
+            onNavigate('dashboard');
+          }
           // Clean up URL params after successful auth
           window.history.replaceState({}, document.title, window.location.pathname);
         }, 1500);
 
       } catch (error) {
         console.error('Auth callback error:', error);
+        
+        // FIXED: Clear any partial auth data on error
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_data');
+        
         setError(error.message);
         setStatus('error');
         
-        // Redirect to home page after error
+        // Redirect to home page after error with longer delay
         setTimeout(() => {
-          onNavigate('home');
+          if (onNavigate) {
+            onNavigate('home');
+          }
           // Clean up URL params after error
           window.history.replaceState({}, document.title, window.location.pathname);
-        }, 3000);
+        }, 4000);
       }
     };
 
@@ -143,18 +173,38 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
             <h2 className="text-xl font-semibold text-red-800 mt-4">
               Authentication Failed
             </h2>
-            <p className="text-red-600 mt-2">
+            <p className="text-red-600 mt-2 mb-4">
               {error || 'Something went wrong during authentication'}
             </p>
-            <p className="text-gray-500 text-sm mt-3">
-              Redirecting to home page...
+            
+            {/* ADDED: More detailed error information */}
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-left">
+              <p className="text-red-700 font-medium mb-1">Troubleshooting:</p>
+              <ul className="text-red-600 text-xs space-y-1">
+                <li>• Check your internet connection</li>
+                <li>• Try signing in again</li>
+                <li>• Clear your browser cache if the issue persists</li>
+              </ul>
+            </div>
+            
+            <p className="text-gray-500 text-sm mt-4">
+              Redirecting to home page in a few seconds...
             </p>
-            <button
-              onClick={() => onNavigate('home')}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Go to Home
-            </button>
+            
+            <div className="flex gap-2 justify-center mt-4">
+              <button
+                onClick={() => onNavigate && onNavigate('home')}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+              >
+                Go to Home
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+              >
+                Try Again
+              </button>
+            </div>
           </div>
         );
 

@@ -1,5 +1,5 @@
 // src/config/api.js
-// API Configuration for Frontend
+// API Configuration for Frontend - FIXED VERSION
 
 // Determine the base API URL based on environment
 const getApiBaseUrl = () => {
@@ -25,7 +25,7 @@ const API_BASE_URL = getApiBaseUrl();
 
 console.log('API Base URL:', API_BASE_URL);
 
-// API endpoints
+// API endpoints - FIXED: Consistent URL construction
 export const API_ENDPOINTS = {
   // AI Analysis endpoints
   ANALYZE_CODE: `${API_BASE_URL}/api/ai/analyze`,
@@ -43,8 +43,9 @@ export const API_ENDPOINTS = {
   GITHUB_AUTH: `${API_BASE_URL}/api/auth/github`,
   GITHUB_CALLBACK: `${API_BASE_URL}/api/auth/github/callback`,
   LOGOUT: `${API_BASE_URL}/api/auth/logout`,
+  GET_ME: `${API_BASE_URL}/api/auth/me`, // ADDED: This endpoint exists in your backend
   
-  // User endpoints
+  // User endpoints - FIXED: These should match your backend routes
   GET_PROFILE: `${API_BASE_URL}/api/users/profile`,
   UPDATE_PREFERENCES: `${API_BASE_URL}/api/users/preferences`,
   
@@ -54,9 +55,9 @@ export const API_ENDPOINTS = {
   TEST_ANALYZE: `${API_BASE_URL}/api/ai/test-analyze`
 };
 
-// Helper function for making API calls
+// Helper function for making API calls - FIXED: Better error handling
 export const apiCall = async (endpoint, options = {}) => {
-  const token = localStorage.getItem('auth_token');
+  const token = localStorage.getItem('auth_token'); // FIXED: Consistent token key
   const defaultOptions = {
     headers: {
       'Content-Type': 'application/json',
@@ -69,15 +70,36 @@ export const apiCall = async (endpoint, options = {}) => {
 
   try {
     console.log(`Making API call to: ${endpoint}`);
+    console.log('With token:', token ? 'Present' : 'Missing');
+    
     const response = await fetch(endpoint, defaultOptions);
     
     // Log response for debugging
     console.log(`API Response [${response.status}]:`, response.statusText);
     
+    // FIXED: Better error handling for different status codes
+    if (response.status === 401) {
+      // Token expired or invalid - clear auth data
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user_data');
+      console.warn('Authentication failed - token cleared');
+      throw new Error('Authentication required. Please sign in again.');
+    }
+    
+    if (response.status === 404) {
+      console.error(`Endpoint not found: ${endpoint}`);
+      throw new Error(`API endpoint not found: ${response.status}`);
+    }
+
     if (!response.ok) {
-      const errorData = await response.text();
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { message: await response.text() };
+      }
       console.error(`API Error [${response.status}]:`, errorData);
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      throw new Error(errorData.message || `API Error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
@@ -88,21 +110,50 @@ export const apiCall = async (endpoint, options = {}) => {
   }
 };
 
-// Specific API functions
+// FIXED: Updated API functions with better error handling
 export const analyzeCode = async (code, language, options = {}) => {
-  return await apiCall(API_ENDPOINTS.ANALYZE_CODE, {
-    method: 'POST',
-    body: JSON.stringify({
-      code,
-      language,
-      selectedLanguage: options.selectedLanguage,
-      preferences: options.preferences || {
-        strictness: 'balanced',
-        focusAreas: ['quality', 'security', 'performance'],
-        verbosity: 'detailed'
+  try {
+    return await apiCall(API_ENDPOINTS.ANALYZE_CODE, {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        language,
+        selectedLanguage: options.selectedLanguage,
+        preferences: options.preferences || {
+          strictness: 'balanced',
+          focusAreas: ['quality', 'security', 'performance'],
+          verbosity: 'detailed'
+        }
+      }),
+    });
+  } catch (error) {
+    // If analyze fails, try localhost as fallback for development
+    if (API_BASE_URL.includes('onrender.com') && window.location.hostname === 'localhost') {
+      console.warn('Production API failed, trying localhost fallback...');
+      try {
+        return await apiCall('http://localhost:5000/api/ai/analyze', {
+          method: 'POST',
+          body: JSON.stringify({
+            code,
+            language,
+            selectedLanguage: options.selectedLanguage,
+            preferences: options.preferences || {
+              strictness: 'balanced',
+              focusAreas: ['quality', 'security', 'performance'],
+              verbosity: 'detailed'
+            }
+          }),
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+      } catch (fallbackError) {
+        console.error('Localhost fallback also failed:', fallbackError);
+        throw error; // Throw original error
       }
-    }),
-  });
+    }
+    throw error;
+  }
 };
 
 export const getLanguages = async () => {
@@ -128,6 +179,19 @@ export const testConnection = async () => {
   }
 };
 
+// ADDED: Helper function to get user profile
+export const getUserProfile = async () => {
+  return await apiCall(API_ENDPOINTS.GET_PROFILE);
+};
+
+// ADDED: Helper function to update preferences
+export const updateUserPreferences = async (preferences) => {
+  return await apiCall(API_ENDPOINTS.UPDATE_PREFERENCES, {
+    method: 'POST',
+    body: JSON.stringify(preferences),
+  });
+};
+
 // Export the base URL for use in other components
 export { API_BASE_URL };
 
@@ -138,5 +202,7 @@ export default {
   getLanguages,
   detectLanguage,
   testConnection,
+  getUserProfile,
+  updateUserPreferences,
   API_BASE_URL
 };
