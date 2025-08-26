@@ -3,18 +3,20 @@
 
 // Determine the base API URL based on environment
 const getApiBaseUrl = () => {
-  // If running in development
-  if (process.env.NODE_ENV === 'development') {
-    // Check if custom API URL is set in environment
+  // Force production URL if we're on Vercel
+  if (window.location.hostname.includes('vercel.app')) {
+    return 'https://codelens-backend-0xl0.onrender.com';
+  }
+  
+  // If running in development (localhost)
+  if (window.location.hostname === 'localhost') {
     if (import.meta.env.VITE_API_URL) {
-  return import.meta.env.VITE_API_URL;
-}
-    // Default to localhost for development
+      return import.meta.env.VITE_API_URL;
+    }
     return 'http://localhost:5000';
   }
 
-  // Production - use your deployed backend URL
-  // You'll replace this with your actual Render backend URL
+  // Production fallback
   return import.meta.env.VITE_API_URL || 'https://codelens-backend-0xl0.onrender.com';
 };
 
@@ -54,12 +56,14 @@ export const API_ENDPOINTS = {
 
 // Helper function for making API calls
 export const apiCall = async (endpoint, options = {}) => {
+  const token = localStorage.getItem('auth_token');
   const defaultOptions = {
     headers: {
       'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` }),
       ...options.headers,
     },
-    credentials: 'include', // Include cookies for authentication
+    credentials: 'include',
     ...options,
   };
 
