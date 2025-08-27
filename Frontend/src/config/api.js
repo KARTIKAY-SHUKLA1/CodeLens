@@ -9,33 +9,19 @@ const getApiBaseUrl = () => {
     return import.meta.env.VITE_API_URL;
   }
   
-  // ALWAYS use production URL when deployed (this fixes your main issue)
-  if (window.location.hostname.includes('vercel.app') || 
-      window.location.hostname.includes('netlify.app') ||
-      window.location.protocol === 'https:') {
-    console.log('Detected production environment, using production API');
-    return 'https://codelens-backend-0xl0.onrender.com';
-  }
-  
-  // Development - but ALWAYS use production API for now to avoid connection issues
-  if (window.location.hostname === 'localhost' || 
-      window.location.hostname === '127.0.0.1') {
-    console.log('Development mode - using production API');
-    // Use production API even in development to avoid localhost:5000 connection issues
-    return 'https://codelens-backend-0xl0.onrender.com';
-  }
-
-  // Final fallback to production
-  return 'https://codelens-backend-0xl0.onrender.com';
+  // ALWAYS use production URL - this fixes your connection issues
+  const productionURL = 'https://codelens-backend-0xl0.onrender.com';
+  console.log('Using production API URL:', productionURL);
+  return productionURL;
 };
 
 const API_BASE_URL = getApiBaseUrl();
 
 console.log('API Base URL:', API_BASE_URL);
 
-// CORRECTED: API endpoints to match your backend exactly
+// API endpoints - These match your backend routes exactly
 export const API_ENDPOINTS = {
-  // AI Analysis endpoints - FIXED: Use /analyze (from your ai.routes.js)
+  // AI Analysis endpoints
   ANALYZE_CODE: `${API_BASE_URL}/api/ai/analyze`,
   REVIEW_CODE: `${API_BASE_URL}/api/ai/review`,
   GET_LANGUAGES: `${API_BASE_URL}/api/ai/languages`,
@@ -47,14 +33,14 @@ export const API_ENDPOINTS = {
   UPDATE_REVIEW: `${API_BASE_URL}/api/reviews`,
   DELETE_REVIEW: `${API_BASE_URL}/api/reviews`,
   
-  // Auth endpoints - CORRECTED: Match your auth.routes.js exactly
+  // Auth endpoints
   GITHUB_AUTH: `${API_BASE_URL}/api/auth/github`,
   GITHUB_CALLBACK: `${API_BASE_URL}/api/auth/github/callback`,
   VERIFY_TOKEN: `${API_BASE_URL}/api/auth/verify-token`,
   GET_ME: `${API_BASE_URL}/api/auth/me`,
   LOGOUT: `${API_BASE_URL}/api/auth/logout`,
   
-  // User endpoints - CORRECTED: Match your user.routes.js exactly
+  // User endpoints
   GET_PROFILE: `${API_BASE_URL}/api/users/profile`,
   UPDATE_PREFERENCES: `${API_BASE_URL}/api/users/preferences`,
   UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
@@ -74,7 +60,7 @@ const getAuthToken = () => {
 const setAuthToken = (token) => {
   if (token) {
     localStorage.setItem('auth_token', token);
-    localStorage.setItem('token', token); // Backup key
+    localStorage.setItem('token', token);
     console.log('Token stored successfully');
   }
 };
@@ -87,7 +73,7 @@ const clearAuthToken = () => {
   console.log('Tokens cleared');
 };
 
-// IMPROVED: API call function with better error handling
+// IMPROVED API call function with better error handling
 export const apiCall = async (endpoint, options = {}) => {
   const token = getAuthToken();
   
@@ -161,7 +147,7 @@ export const apiCall = async (endpoint, options = {}) => {
   }
 };
 
-// CORRECTED: Authentication function
+// Authentication function
 export const authenticateUser = async (token) => {
   try {
     const response = await apiCall(API_ENDPOINTS.VERIFY_TOKEN, {
@@ -186,12 +172,11 @@ export const authenticateUser = async (token) => {
   }
 };
 
-// CORRECTED: Get current user function
+// Get current user function
 export const getCurrentUser = async () => {
   try {
     const response = await apiCall(API_ENDPOINTS.GET_PROFILE);
     
-    // Your backend returns { success: true, user: {...}, statistics: {...} }
     const userData = response.user || response;
     
     if (userData) {
@@ -211,7 +196,7 @@ export const getCurrentUser = async () => {
   }
 };
 
-// CORRECTED: Code analysis function - Use the /analyze endpoint
+// Code analysis function
 export const analyzeCode = async (code, language, options = {}) => {
   try {
     console.log('Analyzing code...');

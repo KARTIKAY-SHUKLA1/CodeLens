@@ -1,99 +1,23 @@
 const express = require('express');
-const passport = require('passport');
 const { createClient } = require('@supabase/supabase-js');
 const Joi = require('joi');
+const { authenticateToken } = require('../middleware/auth.middleware');
 const router = express.Router();
 
 // Initialize Supabase
 const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://db.oqrnlnvrrnugkxhjixyr.supabase.co',
-  process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_URL || 'https://oqrnlnvrrnugkxhjixyr.supabase.co',
+  process.env.SUPABASE_SERVICE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
 );
 
-// IMPROVED: More robust authentication middleware
-router.use(async (req, res, next) => {
-  try {
-    console.log('=== Auth Middleware Debug ===');
-    console.log('Request URL:', req.originalUrl);
-    console.log('Request Method:', req.method);
-    
-    // Extract token from Authorization header
-    const authHeader = req.headers.authorization;
-    console.log('Auth header:', authHeader ? 'Present' : 'Missing');
-    
-    if (!authHeader) {
-      console.log('❌ No authorization header');
-      return res.status(401).json({
-        success: false,
-        message: 'No authorization header provided',
-        error: 'MISSING_AUTH_HEADER'
-      });
-    }
-
-    if (!authHeader.startsWith('Bearer ')) {
-      console.log('❌ Invalid authorization header format');
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid authorization header format',
-        error: 'INVALID_AUTH_FORMAT'
-      });
-    }
-
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    console.log('Token extracted:', token ? 'Present' : 'Missing');
-
-    if (!token) {
-      console.log('❌ No token found');
-      return res.status(401).json({
-        success: false,
-        message: 'No authentication token provided',
-        error: 'MISSING_TOKEN'
-      });
-    }
-
-    // Use passport JWT authentication
-    passport.authenticate('jwt', { session: false }, (error, user, info) => {
-      console.log('Passport authenticate result:');
-      console.log('- Error:', error ? error.message : 'None');
-      console.log('- User:', user ? `ID: ${user.id}` : 'None');
-      console.log('- Info:', info ? info.message : 'None');
-
-      if (error) {
-        console.error('❌ Passport JWT error:', error);
-        return res.status(500).json({
-          success: false,
-          message: 'Authentication error',
-          error: 'AUTH_ERROR',
-          details: error.message
-        });
-      }
-
-      if (!user) {
-        console.error('❌ JWT authentication failed:', info);
-        return res.status(401).json({
-          success: false,
-          message: 'Invalid or expired token',
-          error: 'INVALID_TOKEN',
-          details: info?.message || 'Authentication failed'
-        });
-      }
-
-      // Successfully authenticated - set user on request
-      req.user = user;
-      console.log('✅ Authenticated user:', user.id);
-      next();
-    })(req, res, next);
-
-  } catch (error) {
-    console.error('❌ Auth middleware error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Authentication middleware error',
-      error: 'MIDDLEWARE_ERROR',
-      details: error.message
-    });
-  }
-});
+// Apply authentication middleware to all routes
+router.use(authenticateToken);
 
 // Validation schemas
 const updateProfileSchema = Joi.object({
