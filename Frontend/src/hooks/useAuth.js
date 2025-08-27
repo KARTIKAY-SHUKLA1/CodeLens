@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { API_ENDPOINTS, getUserProfile, updateUserPreferences } from '../config/api';
+import { API_ENDPOINTS, getUserProfile, updateUserPreferences, apiCall } from '../config/api';
 
-// FIXED Real Authentication Hook - Consistent with API config
+// CORRECTED Authentication Hook
 function useAuth() {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -10,28 +10,50 @@ function useAuth() {
   // Check if user is already authenticated on app load
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
+    console.log('useAuth useEffect - token exists:', !!token);
+    
     if (token) {
       fetchUserProfile();
     }
   }, []);
 
-  // FIXED: Fetch user profile using the centralized API config
+  // CORRECTED: Fetch user profile with proper error handling
   const fetchUserProfile = async () => {
     try {
       setIsLoading(true);
-      const userData = await getUserProfile();
-      setUser(userData);
+      console.log('Fetching user profile...');
       
-      // Show welcome modal for new users
-      if (userData.isNewUser) {
-        setShowWelcome(true);
+      // Use the getUserProfile function which handles your backend response format
+      const response = await getUserProfile();
+      console.log('User profile response:', response);
+      
+      // Your backend returns { success: true, user: {...}, statistics: {...} }
+      const userData = response.user || response;
+      
+      if (userData && userData.id) {
+        setUser(userData);
+        console.log('User set successfully:', userData.id);
+        
+        // Show welcome modal for new users
+        if (userData.isNewUser) {
+          setShowWelcome(true);
+        }
+      } else {
+        throw new Error('Invalid user data received');
       }
+      
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
-      // Clear invalid token
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_data');
-      setUser(null);
+      
+      // Only clear tokens if it's an auth error (401)
+      if (error.message.includes('Authentication required') || 
+          error.message.includes('Invalid token') ||
+          error.message.includes('401')) {
+        console.log('Clearing invalid auth data');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_data');
+        setUser(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -40,15 +62,18 @@ function useAuth() {
   // Refresh user data (called after OAuth success)
   const refreshUser = () => {
     const token = localStorage.getItem('auth_token');
+    console.log('Refreshing user, token exists:', !!token);
     if (token) {
       fetchUserProfile();
     }
   };
 
-  // FIXED: GitHub OAuth Sign In - Use API_ENDPOINTS
+  // GitHub OAuth Sign In
   const signIn = async () => {
     setIsLoading(true);
     try {
+      console.log('Starting GitHub OAuth...');
+      console.log('Redirecting to:', API_ENDPOINTS.GITHUB_AUTH);
       // Redirect to GitHub OAuth using the centralized endpoint
       window.location.href = API_ENDPOINTS.GITHUB_AUTH;
     } catch (error) {
@@ -57,40 +82,36 @@ function useAuth() {
     }
   };
 
-  // FIXED: Handle OAuth callback - Use API_ENDPOINTS
+  // CORRECTED: Handle OAuth callback with better validation
   const handleAuthCallback = async (code, state = null) => {
     setIsLoading(true);
     try {
-      const response = await fetch(API_ENDPOINTS.GITHUB_CALLBACK, {
+      console.log('Handling auth callback with code:', code ? 'present' : 'missing');
+      
+      const response = await apiCall(API_ENDPOINTS.GITHUB_CALLBACK, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ code, state }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Authentication failed');
-      }
-
-      const data = await response.json();
+      console.log('Auth callback response:', response);
       
-      // Store the JWT token and user data
-      if (data.token) {
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('user_data', JSON.stringify(data.user));
-        setUser(data.user);
+      // Your backend returns { success: true, token: "...", user: {...} }
+      if (response.success && response.token && response.user) {
+        localStorage.setItem('auth_token', response.token);
+        localStorage.setItem('user_data', JSON.stringify(response.user));
+        setUser(response.user);
         
         // Show welcome modal for new users
-        if (data.user.isNewUser) {
+        if (response.user.isNewUser) {
           setShowWelcome(true);
         }
+        
+        console.log('Authentication successful for user:', response.user.id);
+        return response;
       } else {
-        throw new Error('No token received from server');
+        throw new Error('Invalid response format from server');
       }
       
-      return data;
     } catch (error) {
       console.error('Auth callback error:', error);
       // Clear any partial auth data
@@ -103,12 +124,13 @@ function useAuth() {
     }
   };
 
-  // FIXED: Sign Out - Use API_ENDPOINTS
+  // CORRECTED: Sign Out
   const signOut = async () => {
     try {
       const token = localStorage.getItem('auth_token');
       if (token) {
-        await fetch(API_ENDPOINTS.LOGOUT, {
+        // Use the correct logout endpoint
+        await apiCall(API_ENDPOINTS.LOGOUT, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -118,6 +140,7 @@ function useAuth() {
       }
     } catch (error) {
       console.error('Sign out error:', error);
+      // Don't throw - still proceed with local cleanup
     } finally {
       // Always clear local data regardless of API call success
       localStorage.removeItem('auth_token');
@@ -127,13 +150,23 @@ function useAuth() {
     }
   };
 
-  // FIXED: Save user preferences after onboarding
+  // CORRECTED: Save user preferences after onboarding
   const handleWelcomeComplete = async (preferences) => {
     try {
-      const updatedUser = await updateUserPreferences(preferences);
-      setUser(prev => ({ ...prev, preferences, isNewUser: false }));
+      console.log('Saving onboarding preferences:', preferences);
+      const response = await updateUserPreferences(preferences);
+      
+      // Your backend returns { success: true, user: {...} }
+      if (response.success && response.user) {
+        setUser(response.user);
+      } else {
+        // Update local state even if API call has different format
+        setUser(prev => ({ ...prev, preferences, isNewUser: false }));
+      }
+      
       setShowWelcome(false);
-      return updatedUser;
+      console.log('Welcome completed successfully');
+      return response;
     } catch (error) {
       console.error('Failed to save preferences:', error);
       // Still close welcome modal and update local state even if API call fails
@@ -143,42 +176,34 @@ function useAuth() {
     }
   };
 
-  // FIXED: Update review usage (called after code analysis)
-  const updateReviewUsage = async () => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      if (!token) {
-        console.warn('No auth token found for review usage update');
-        return;
-      }
-
-      const response = await fetch(API_ENDPOINTS.INCREMENT_USAGE, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const updatedData = await response.json();
-        setUser(prev => ({ ...prev, reviewsUsed: updatedData.reviewsUsed }));
-      } else {
-        console.error('Failed to update review usage:', response.statusText);
-      }
-    } catch (error) {
-      console.error('Failed to update review usage:', error);
+  // Update review usage (called after code analysis)
+  const updateReviewUsage = (creditsInfo) => {
+    if (creditsInfo && user) {
+      setUser(prev => ({ 
+        ...prev, 
+        reviewsUsed: creditsInfo.used,
+        reviewsLimit: creditsInfo.limit
+      }));
     }
   };
 
-  // ADDED: Helper to check if user is authenticated
+  // Helper to check if user is authenticated
   const isAuthenticated = () => {
     return !!user && !!localStorage.getItem('auth_token');
   };
 
-  // ADDED: Helper to get current auth token
+  // Helper to get current auth token
   const getAuthToken = () => {
     return localStorage.getItem('auth_token');
+  };
+
+  // Helper to manually set user data (for testing/debugging)
+  const setUserData = (userData, token = null) => {
+    setUser(userData);
+    if (token) {
+      localStorage.setItem('auth_token', token);
+    }
+    localStorage.setItem('user_data', JSON.stringify(userData));
   };
 
   return { 
@@ -193,7 +218,8 @@ function useAuth() {
     updateReviewUsage,
     refreshUser,
     isAuthenticated,
-    getAuthToken
+    getAuthToken,
+    setUserData
   };
 }
 
