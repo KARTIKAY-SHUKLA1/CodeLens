@@ -1,23 +1,33 @@
-// src/app.js (UPDATED VERSION WITH AUTH - API ONLY)
+// src/app.js - MAIN EXPRESS APPLICATION SETUP
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 const passport = require('passport');
 const session = require('express-session');
-const { createClient } = require('@supabase/supabase-js');
+const rateLimit = require('express-rate-limit');
+
+// Import configuration
+require('./config/passport')(passport);
+
+// Import routes
+const authRoutes = require('./routes/auth.routes');
+const userRoutes = require('./routes/user.routes');
+const aiRoutes = require('./routes/ai.routes');
+const reviewRoutes = require('./routes/review.routes');
 
 const app = express();
 
-// Initialize Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://db.oqrnlnvrrnugkxhjixyr.supabase.co',
-  process.env.SUPABASE_ANON_KEY || process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || ''
-);
+// Logging configuration
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+} else {
+  app.use(morgan('combined'));
+}
 
 // Security middleware
 app.use(helmet({
+  crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -25,52 +35,68 @@ app.use(helmet({
       scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
     },
-  },
+  }
 }));
+
+// CORS configuration - FIXED
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001', 
+      'https://codelens-frontend.vercel.app',
+      'https://codelens.vercel.app',
+      process.env.CORS_ORIGIN
+    ].filter(Boolean);
+    
+    // Allow requests with no origin (mobile apps, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS: Origin ${origin} not allowed`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Origin', 
+    'X-Requested-With', 
+    'Content-Type', 
+    'Accept', 
+    'Authorization',
+    'Cache-Control',
+    'Pragma'
+  ],
+  exposedHeaders: ['set-cookie']
+};
+
+app.use(cors(corsOptions));
 
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: process.env.NODE_ENV === 'development' ? 1000 : 100, // requests per window
   message: {
-    error: 'Too many requests from this IP, please try again later.'
-  }
-});
-app.use(limiter);
-
-// API-specific rate limiting for AI endpoints
-const aiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 AI requests per minute
-  message: {
-    error: 'AI request limit exceeded. Please wait before making another request.'
-  }
+    success: false,
+    message: 'Too many requests from this IP, please try again later.',
+    error: 'RATE_LIMIT_EXCEEDED'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-  const corsOrigins = process.env.NODE_ENV === 'production' 
-  ? [
-      process.env.CORS_ORIGIN, 
-      'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app'
-    ].filter(Boolean) // Remove undefined values
-  : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
-
-app.use(cors({
-  origin: corsOrigins,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Logging
-app.use(morgan('combined'));
+app.use('/api/', limiter);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Session configuration for OAuth
+// Session configuration (needed for OAuth)
 app.use(session({
-  secret: process.env.JWT_SECRET,
+  secret: process.env.SESSION_SECRET || 'codelens-session-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -80,123 +106,123 @@ app.use(session({
   }
 }));
 
-// Initialize Passport
+// Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Import and configure Passport strategies
-require('./config/passport')(passport);
-
-// Root endpoint - API info
-app.get('/', (req, res) => {
-  res.json({
-    name: 'CodeLens API',
-    version: '1.0.0',
-    status: 'running',
-    endpoints: [
-      'GET /health - Health check',
-      'POST /api/auth/* - Authentication routes',
-      'GET /api/users/* - User management',
-      'POST /api/ai/* - AI code analysis',
-      'GET /api/reviews/* - Review management'
-    ],
-    timestamp: new Date().toISOString()
-  });
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  if (req.headers.authorization) {
+    console.log('Auth header present:', req.headers.authorization.substring(0, 20) + '...');
+  }
+  next();
 });
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
+  res.json({
+    success: true,
+    message: 'CodeLens API is running',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
-    services: {
-      database: process.env.SUPABASE_URL ? 'connected' : 'not configured',
-      ai: process.env.GOOGLE_GEMINI_KEY ? 'configured' : 'not configured',
-      github: process.env.GITHUB_CLIENT_ID ? 'configured' : 'not configured'
-    }
+    version: '1.0.0'
   });
 });
 
-// API Routes
-app.use('/api/auth', require('./routes/auth.routes'));
-app.use('/api/users', require('./routes/user.routes'));
-app.use('/api/ai', aiLimiter, require('./routes/ai.routes'));
-app.use('/api/reviews', require('./routes/review.routes'));
+// API Routes - FIXED MOUNTING
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/reviews', reviewRoutes);
 
-// API 404 handler - Only for API routes
-app.use('/api/*', (req, res) => {
-  res.status(404).json({
-    error: 'API endpoint not found',
-    message: `Cannot ${req.method} ${req.originalUrl}`,
-    availableEndpoints: ['/api/auth', '/api/users', '/api/ai', '/api/reviews']
+// API Documentation endpoint
+app.get('/api', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CodeLens API v1.0.0',
+    documentation: {
+      auth: {
+        'POST /api/auth/github/callback': 'GitHub OAuth callback',
+        'POST /api/auth/verify-token': 'Verify JWT token',
+        'GET /api/auth/me': 'Get current user (requires auth)',
+        'POST /api/auth/logout': 'Logout user'
+      },
+      users: {
+        'GET /api/users/profile': 'Get user profile (requires auth)',
+        'POST /api/users/preferences': 'Save user preferences (requires auth)',
+        'PUT /api/users/profile': 'Update user profile (requires auth)'
+      },
+      ai: {
+        'POST /api/ai/analyze': 'Analyze code (public endpoint)',
+        'POST /api/ai/review': 'Analyze code (requires auth)',
+        'GET /api/ai/languages': 'Get supported languages'
+      }
+    },
+    timestamp: new Date().toISOString()
   });
 });
 
-// Catch-all for non-API routes
+// 404 handler
 app.use('*', (req, res) => {
+  console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
-    error: 'Not Found',
-    message: 'This is an API server. Frontend should be deployed separately.',
-    api: {
-      base: '/api',
-      health: '/health',
-      docs: 'Available endpoints listed at root /'
-    }
+    success: false,
+    message: 'API endpoint not found',
+    error: 'ENDPOINT_NOT_FOUND',
+    availableEndpoints: [
+      '/api/auth/*',
+      '/api/users/*', 
+      '/api/ai/*',
+      '/health'
+    ]
   });
 });
 
 // Global error handler
 app.use((error, req, res, next) => {
-  console.error('Global Error Handler:', error);
+  console.error('Global error handler:', error);
   
-  // JWT errors
-  if (error.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      error: 'Invalid token',
-      message: 'Authentication required'
+  if (error.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: 'CORS policy violation',
+      error: 'CORS_ERROR'
     });
   }
-  
-  // Validation errors
-  if (error.name === 'ValidationError') {
+
+  if (error.type === 'entity.parse.failed') {
     return res.status(400).json({
-      error: 'Validation failed',
-      details: error.details
+      success: false,
+      message: 'Invalid JSON in request body',
+      error: 'INVALID_JSON'
     });
   }
-  
-  // Database errors
-  if (error.code === '23505') { // Unique constraint violation
-    return res.status(409).json({
-      error: 'Resource already exists',
-      message: 'This data already exists in the system'
+
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      message: 'Request body too large',
+      error: 'PAYLOAD_TOO_LARGE'
     });
   }
-  
-  // Default error
-  const statusCode = error.status || error.statusCode || 500;
-  res.status(statusCode).json({
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : error.message,
-    ...(process.env.NODE_ENV !== 'production' && { 
-      stack: error.stack,
-      details: error 
-    })
+
+  res.status(error.status || 500).json({
+    success: false,
+    message: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+    error: 'SERVER_ERROR',
+    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
+// Graceful shutdown handler
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Shutting down gracefully...');
-  process.exit(0);
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
 });
 
 module.exports = app;

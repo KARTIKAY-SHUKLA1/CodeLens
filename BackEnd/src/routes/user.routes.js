@@ -7,17 +7,43 @@ const router = express.Router();
 // Initialize Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL || 'https://db.oqrnlnvrrnugkxhjixyr.supabase.co',
-  process.env.SUPABASE_SERVICE_KEY || process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || ''
+  process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
-// FIXED: Better authentication middleware with error handling
+// IMPROVED: More robust authentication middleware
 router.use(async (req, res, next) => {
   try {
+    console.log('=== Auth Middleware Debug ===');
+    console.log('Request URL:', req.originalUrl);
+    console.log('Request Method:', req.method);
+    
     // Extract token from Authorization header
     const authHeader = req.headers.authorization;
     console.log('Auth header:', authHeader ? 'Present' : 'Missing');
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!authHeader) {
+      console.log('❌ No authorization header');
+      return res.status(401).json({
+        success: false,
+        message: 'No authorization header provided',
+        error: 'MISSING_AUTH_HEADER'
+      });
+    }
+
+    if (!authHeader.startsWith('Bearer ')) {
+      console.log('❌ Invalid authorization header format');
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid authorization header format',
+        error: 'INVALID_AUTH_FORMAT'
+      });
+    }
+
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    console.log('Token extracted:', token ? 'Present' : 'Missing');
+
+    if (!token) {
+      console.log('❌ No token found');
       return res.status(401).json({
         success: false,
         message: 'No authentication token provided',
@@ -27,36 +53,44 @@ router.use(async (req, res, next) => {
 
     // Use passport JWT authentication
     passport.authenticate('jwt', { session: false }, (error, user, info) => {
+      console.log('Passport authenticate result:');
+      console.log('- Error:', error ? error.message : 'None');
+      console.log('- User:', user ? `ID: ${user.id}` : 'None');
+      console.log('- Info:', info ? info.message : 'None');
+
       if (error) {
-        console.error('Passport JWT error:', error);
+        console.error('❌ Passport JWT error:', error);
         return res.status(500).json({
           success: false,
           message: 'Authentication error',
-          error: 'AUTH_ERROR'
+          error: 'AUTH_ERROR',
+          details: error.message
         });
       }
 
       if (!user) {
-        console.error('JWT authentication failed:', info);
+        console.error('❌ JWT authentication failed:', info);
         return res.status(401).json({
           success: false,
           message: 'Invalid or expired token',
           error: 'INVALID_TOKEN',
-          details: info?.message
+          details: info?.message || 'Authentication failed'
         });
       }
 
       // Successfully authenticated - set user on request
       req.user = user;
-      console.log('Authenticated user:', user.id);
+      console.log('✅ Authenticated user:', user.id);
       next();
     })(req, res, next);
 
   } catch (error) {
-    console.error('Auth middleware error:', error);
+    console.error('❌ Auth middleware error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Authentication middleware error'
+      message: 'Authentication middleware error',
+      error: 'MIDDLEWARE_ERROR',
+      details: error.message
     });
   }
 });
@@ -79,20 +113,23 @@ const preferencesSchema = Joi.object({
 });
 
 // @route   GET /api/users/profile
-// @desc    Get user profile (Updated to match frontend expectations)
+// @desc    Get user profile
 // @access  Private
 router.get('/profile', async (req, res) => {
   try {
+    console.log('=== GET Profile Endpoint ===');
     console.log('Getting profile for user ID:', req.user?.id);
     
-    // FIXED: Better error handling for missing user
     if (!req.user || !req.user.id) {
+      console.log('❌ No user ID found in request');
       return res.status(401).json({
         success: false,
         message: 'User not authenticated',
         error: 'NO_USER_ID'
       });
     }
+
+    console.log('Querying Supabase for user:', req.user.id);
 
     const { data: user, error } = await supabase
       .from('users')
@@ -105,13 +142,25 @@ router.get('/profile', async (req, res) => {
       .single();
 
     if (error) {
-      console.error('Supabase error getting user:', error);
+      console.error('❌ Supabase error getting user:', error);
+      return res.status(404).json({
+        success: false,
+        message: 'User profile not found',
+        error: 'USER_NOT_FOUND',
+        details: error.message
+      });
+    }
+
+    if (!user) {
+      console.log('❌ No user data returned from Supabase');
       return res.status(404).json({
         success: false,
         message: 'User profile not found',
         error: 'USER_NOT_FOUND'
       });
     }
+
+    console.log('✅ User found:', user.id);
 
     // Get user statistics
     const { data: reviewStats, error: statsError } = await supabase
@@ -120,7 +169,7 @@ router.get('/profile', async (req, res) => {
       .eq('user_id', req.user.id);
 
     if (statsError) {
-      console.error('Error getting user stats:', statsError);
+      console.error('⚠️ Error getting user stats:', statsError);
     }
 
     // Calculate statistics
@@ -147,14 +196,14 @@ router.get('/profile', async (req, res) => {
       email: user.email,
       avatar: user.avatar_url,
       githubUsername: user.username,
-      plan: user.plan,
-      reviewsUsed: user.credits_used,
-      reviewsLimit: user.credits_limit,
+      plan: user.plan || 'free',
+      reviewsUsed: user.credits_used || 0,
+      reviewsLimit: user.credits_limit || 100,
       isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
-      preferences: user.preferences
+      preferences: user.preferences || {}
     };
 
-    console.log('Returning user profile:', formattedUser.id);
+    console.log('✅ Returning user profile for:', formattedUser.id);
     
     res.json({
       success: true,
@@ -164,29 +213,32 @@ router.get('/profile', async (req, res) => {
         completedReviews,
         averageScore: parseFloat(averageScore),
         topLanguages,
-        creditsRemaining: user.credits_limit - user.credits_used
+        creditsRemaining: (user.credits_limit || 100) - (user.credits_used || 0)
       }
     });
 
   } catch (error) {
-    console.error('Get profile error:', error);
+    console.error('❌ Get profile error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to get user profile',
-      error: 'SERVER_ERROR'
+      error: 'SERVER_ERROR',
+      details: error.message
     });
   }
 });
 
-// @route   POST /api/users/preferences (Required by frontend)
+// @route   POST /api/users/preferences
 // @desc    Save user preferences from onboarding
 // @access  Private
 router.post('/preferences', async (req, res) => {
   try {
+    console.log('=== POST Preferences Endpoint ===');
     console.log('Saving preferences for user ID:', req.user?.id);
+    console.log('Preferences data:', JSON.stringify(req.body, null, 2));
     
-    // FIXED: Better error handling for missing user
     if (!req.user || !req.user.id) {
+      console.log('❌ No user ID found in request');
       return res.status(401).json({
         success: false,
         message: 'User not authenticated',
@@ -197,14 +249,18 @@ router.post('/preferences', async (req, res) => {
     const { error: validationError, value } = preferencesSchema.validate(req.body);
     
     if (validationError) {
+      console.log('❌ Validation error:', validationError.details);
       return res.status(400).json({
         success: false,
         message: 'Invalid preferences data',
+        error: 'VALIDATION_ERROR',
         errors: validationError.details.map(d => d.message)
       });
     }
 
-    // Update user preferences and mark as no longer new user
+    console.log('✅ Preferences validated, updating user...');
+
+    // Update user preferences
     const { data: updatedUser, error } = await supabase
       .from('users')
       .update({
@@ -216,11 +272,25 @@ router.post('/preferences', async (req, res) => {
       .single();
 
     if (error) {
-      console.error('Supabase error updating preferences:', error);
-      throw error;
+      console.error('❌ Supabase error updating preferences:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to save preferences to database',
+        error: 'DATABASE_ERROR',
+        details: error.message
+      });
     }
 
-    console.log('Preferences saved successfully for user:', updatedUser.id);
+    if (!updatedUser) {
+      console.log('❌ No user returned after update');
+      return res.status(404).json({
+        success: false,
+        message: 'User not found after update',
+        error: 'USER_UPDATE_FAILED'
+      });
+    }
+
+    console.log('✅ Preferences saved successfully for user:', updatedUser.id);
 
     res.json({
       success: true,
@@ -231,20 +301,21 @@ router.post('/preferences', async (req, res) => {
         email: updatedUser.email,
         avatar: updatedUser.avatar_url,
         githubUsername: updatedUser.username,
-        plan: updatedUser.plan,
-        reviewsUsed: updatedUser.credits_used,
-        reviewsLimit: updatedUser.credits_limit,
+        plan: updatedUser.plan || 'free',
+        reviewsUsed: updatedUser.credits_used || 0,
+        reviewsLimit: updatedUser.credits_limit || 100,
         isNewUser: false,
-        preferences: updatedUser.preferences
+        preferences: updatedUser.preferences || {}
       }
     });
 
   } catch (error) {
-    console.error('Save preferences error:', error);
+    console.error('❌ Save preferences error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to save preferences',
-      error: 'SERVER_ERROR'
+      error: 'SERVER_ERROR',
+      details: error.message
     });
   }
 });
@@ -254,10 +325,14 @@ router.post('/preferences', async (req, res) => {
 // @access  Private
 router.put('/profile', async (req, res) => {
   try {
+    console.log('=== PUT Profile Endpoint ===');
+    console.log('Updating profile for user ID:', req.user?.id);
+    
     if (!req.user || !req.user.id) {
       return res.status(401).json({
         success: false,
-        message: 'User not authenticated'
+        message: 'User not authenticated',
+        error: 'NO_USER_ID'
       });
     }
 
@@ -267,6 +342,7 @@ router.put('/profile', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Invalid input data',
+        error: 'VALIDATION_ERROR',
         errors: validationError.details.map(d => d.message)
       });
     }
@@ -284,8 +360,16 @@ router.put('/profile', async (req, res) => {
       .single();
 
     if (error) {
-      throw error;
+      console.error('❌ Supabase error updating profile:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update profile',
+        error: 'DATABASE_ERROR',
+        details: error.message
+      });
     }
+
+    console.log('✅ Profile updated successfully');
 
     res.json({
       success: true,
@@ -294,10 +378,12 @@ router.put('/profile', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Update profile error:', error);
+    console.error('❌ Update profile error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update profile'
+      message: 'Failed to update profile',
+      error: 'SERVER_ERROR',
+      details: error.message
     });
   }
 });
@@ -307,10 +393,13 @@ router.put('/profile', async (req, res) => {
 // @access  Private
 router.get('/dashboard', async (req, res) => {
   try {
+    console.log('=== GET Dashboard Endpoint ===');
+    
     if (!req.user || !req.user.id) {
       return res.status(401).json({
         success: false,
-        message: 'User not authenticated'
+        message: 'User not authenticated',
+        error: 'NO_USER_ID'
       });
     }
 
@@ -325,6 +414,7 @@ router.get('/dashboard', async (req, res) => {
       .limit(10);
 
     if (reviewsError) {
+      console.error('❌ Error getting recent reviews:', reviewsError);
       throw reviewsError;
     }
 
@@ -339,6 +429,7 @@ router.get('/dashboard', async (req, res) => {
       .gte('created_at', thirtyDaysAgo.toISOString());
 
     if (monthlyError) {
+      console.error('❌ Error getting monthly reviews:', monthlyError);
       throw monthlyError;
     }
 
@@ -351,7 +442,7 @@ router.get('/dashboard', async (req, res) => {
       dailyReviewCounts[dateStr] = 0;
     }
 
-    monthlyReviews.forEach(review => {
+    monthlyReviews?.forEach(review => {
       const dateStr = review.created_at.split('T')[0];
       if (dailyReviewCounts.hasOwnProperty(dateStr)) {
         dailyReviewCounts[dateStr]++;
@@ -370,17 +461,20 @@ router.get('/dashboard', async (req, res) => {
       .eq('user_id', userId);
 
     if (langError) {
+      console.error('❌ Error getting language data:', langError);
       throw langError;
     }
 
-    const languageDistribution = languageData.reduce((acc, review) => {
+    const languageDistribution = languageData?.reduce((acc, review) => {
       acc[review.language] = (acc[review.language] || 0) + 1;
       return acc;
-    }, {});
+    }, {}) || {};
 
     const languageStats = Object.entries(languageDistribution)
       .sort(([,a], [,b]) => b - a)
       .map(([language, count]) => ({ language, count }));
+
+    console.log('✅ Dashboard data retrieved successfully');
 
     res.json({
       success: true,
@@ -400,10 +494,12 @@ router.get('/dashboard', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Dashboard error:', error);
+    console.error('❌ Dashboard error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to load dashboard data'
+      message: 'Failed to load dashboard data',
+      error: 'SERVER_ERROR',
+      details: error.message
     });
   }
 });
@@ -466,7 +562,7 @@ router.get('/activity', async (req, res) => {
 });
 
 // @route   POST /api/users/upgrade
-// @desc    Upgrade user plan (placeholder)
+// @desc    Upgrade user plan
 // @access  Private
 router.post('/upgrade', async (req, res) => {
   try {
