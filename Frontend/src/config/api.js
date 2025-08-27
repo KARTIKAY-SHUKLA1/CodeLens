@@ -1,31 +1,35 @@
-// src/config/api.js
-// API Configuration for Frontend - FIXED VERSION
+// src/config/api.js - FIXED VERSION
+// API Configuration for Frontend
 
 // Determine the base API URL based on environment
 const getApiBaseUrl = () => {
-  // Force production URL if we're on Vercel
-  if (window.location.hostname.includes('vercel.app')) {
+  // Check environment variable first
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  
+  // Production check
+  if (window.location.hostname.includes('vercel.app') || 
+      window.location.hostname.includes('netlify.app') ||
+      window.location.protocol === 'https:') {
     return 'https://codelens-backend-0xl0.onrender.com';
   }
   
-  // If running in development (localhost)
-  if (window.location.hostname === 'localhost') {
-    if (import.meta.env.VITE_API_URL) {
-      return import.meta.env.VITE_API_URL;
-    }
+  // Development fallback
+  if (window.location.hostname === 'localhost' || 
+      window.location.hostname === '127.0.0.1') {
     return 'http://localhost:5000';
   }
 
-  // Production fallback
-  return import.meta.env.VITE_API_URL || 'https://codelens-backend-0xl0.onrender.com';
+  // Final fallback to production
+  return 'https://codelens-backend-0xl0.onrender.com';
 };
 
-// Create the API configuration
 const API_BASE_URL = getApiBaseUrl();
 
 console.log('API Base URL:', API_BASE_URL);
 
-// API endpoints - FIXED: Consistent URL construction
+// FIXED: Consistent API endpoints matching your backend routes
 export const API_ENDPOINTS = {
   // AI Analysis endpoints
   ANALYZE_CODE: `${API_BASE_URL}/api/ai/analyze`,
@@ -37,27 +41,46 @@ export const API_ENDPOINTS = {
   CREATE_REVIEW: `${API_BASE_URL}/api/reviews`,
   UPDATE_REVIEW: `${API_BASE_URL}/api/reviews`,
   DELETE_REVIEW: `${API_BASE_URL}/api/reviews`,
-  INCREMENT_USAGE: `${API_BASE_URL}/api/reviews/increment`,
   
-  // Auth endpoints
+  // Auth endpoints - FIXED: Using correct endpoints from your backend
   GITHUB_AUTH: `${API_BASE_URL}/api/auth/github`,
   GITHUB_CALLBACK: `${API_BASE_URL}/api/auth/github/callback`,
+  VERIFY_TOKEN: `${API_BASE_URL}/api/auth/verify-token`,
   LOGOUT: `${API_BASE_URL}/api/auth/logout`,
-  GET_ME: `${API_BASE_URL}/api/auth/me`, // ADDED: This endpoint exists in your backend
+  GET_ME: `${API_BASE_URL}/api/auth/me`, // This exists in your backend
   
-  // User endpoints - FIXED: These should match your backend routes
+  // User endpoints - FIXED: These match your backend exactly
   GET_PROFILE: `${API_BASE_URL}/api/users/profile`,
   UPDATE_PREFERENCES: `${API_BASE_URL}/api/users/preferences`,
+  UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
+  GET_DASHBOARD: `${API_BASE_URL}/api/users/dashboard`,
+  GET_ACTIVITY: `${API_BASE_URL}/api/users/activity`,
   
-  // Debug endpoints (for testing)
-  TEST_ENV: `${API_BASE_URL}/api/ai/test-env`,
-  DEBUG_API: `${API_BASE_URL}/api/ai/debug-api`,
-  TEST_ANALYZE: `${API_BASE_URL}/api/ai/test-analyze`
+  // Health check
+  HEALTH: `${API_BASE_URL}/health`
 };
 
-// Helper function for making API calls - FIXED: Better error handling
+// FIXED: Better token management
+const getAuthToken = () => {
+  return localStorage.getItem('auth_token') || localStorage.getItem('token');
+};
+
+const setAuthToken = (token) => {
+  localStorage.setItem('auth_token', token);
+  localStorage.setItem('token', token); // Backup key
+};
+
+const clearAuthToken = () => {
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('token');
+  localStorage.removeItem('user_data');
+  localStorage.removeItem('user');
+};
+
+// FIXED: Improved API call function with better error handling
 export const apiCall = async (endpoint, options = {}) => {
-  const token = localStorage.getItem('auth_token'); // FIXED: Consistent token key
+  const token = getAuthToken();
+  
   const defaultOptions = {
     headers: {
       'Content-Type': 'application/json',
@@ -69,25 +92,26 @@ export const apiCall = async (endpoint, options = {}) => {
   };
 
   try {
-    console.log(`Making API call to: ${endpoint}`);
-    console.log('With token:', token ? 'Present' : 'Missing');
+    console.log(`🔗 API Call: ${endpoint}`);
+    console.log(`🔑 Token: ${token ? 'Present' : 'Missing'}`);
     
     const response = await fetch(endpoint, defaultOptions);
     
-    // Log response for debugging
-    console.log(`API Response [${response.status}]:`, response.statusText);
+    console.log(`📡 Response [${response.status}]: ${response.statusText}`);
     
-    // FIXED: Better error handling for different status codes
+    // Handle different status codes
     if (response.status === 401) {
-      // Token expired or invalid - clear auth data
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_data');
-      console.warn('Authentication failed - token cleared');
-      throw new Error('Authentication required. Please sign in again.');
+      console.warn('🚫 Authentication failed - clearing tokens');
+      clearAuthToken();
+      
+      // If it's not a login-related endpoint, throw auth error
+      if (!endpoint.includes('/auth/')) {
+        throw new Error('Authentication required. Please sign in again.');
+      }
     }
     
     if (response.status === 404) {
-      console.error(`Endpoint not found: ${endpoint}`);
+      console.error(`❌ Endpoint not found: ${endpoint}`);
       throw new Error(`API endpoint not found: ${response.status}`);
     }
 
@@ -96,21 +120,62 @@ export const apiCall = async (endpoint, options = {}) => {
       try {
         errorData = await response.json();
       } catch (e) {
-        errorData = { message: await response.text() };
+        errorData = { message: await response.text() || `HTTP ${response.status}` };
       }
-      console.error(`API Error [${response.status}]:`, errorData);
+      
+      console.error(`💥 API Error [${response.status}]:`, errorData);
       throw new Error(errorData.message || `API Error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
+    console.log('✅ API Call successful');
     return data;
+    
   } catch (error) {
-    console.error('API Call Failed:', error);
+    console.error('❌ API Call Failed:', error);
     throw error;
   }
 };
 
-// FIXED: Updated API functions with better error handling
+// FIXED: Authentication functions
+export const authenticateUser = async (token) => {
+  try {
+    const response = await apiCall(API_ENDPOINTS.VERIFY_TOKEN, {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    
+    if (response.success && response.user) {
+      setAuthToken(token);
+      localStorage.setItem('user_data', JSON.stringify(response.user));
+      return response.user;
+    }
+    
+    throw new Error('Token verification failed');
+  } catch (error) {
+    clearAuthToken();
+    throw error;
+  }
+};
+
+export const getCurrentUser = async () => {
+  try {
+    const response = await apiCall(API_ENDPOINTS.GET_ME);
+    
+    if (response.success && response.user) {
+      localStorage.setItem('user_data', JSON.stringify(response.user));
+      return response.user;
+    }
+    
+    throw new Error('Failed to get current user');
+  } catch (error) {
+    console.error('Get current user failed:', error);
+    clearAuthToken();
+    throw error;
+  }
+};
+
+// FIXED: Code analysis function with fallback
 export const analyzeCode = async (code, language, options = {}) => {
   try {
     return await apiCall(API_ENDPOINTS.ANALYZE_CODE, {
@@ -127,12 +192,17 @@ export const analyzeCode = async (code, language, options = {}) => {
       }),
     });
   } catch (error) {
-    // If analyze fails, try localhost as fallback for development
+    // Only try localhost fallback if we're in development and production failed
     if (API_BASE_URL.includes('onrender.com') && window.location.hostname === 'localhost') {
-      console.warn('Production API failed, trying localhost fallback...');
+      console.warn('🔄 Production API failed, trying localhost fallback...');
       try {
-        return await apiCall('http://localhost:5000/api/ai/analyze', {
+        return await fetch('http://localhost:5000/api/ai/analyze', {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(getAuthToken() && { 'Authorization': `Bearer ${getAuthToken()}` }),
+          },
+          credentials: 'include',
           body: JSON.stringify({
             code,
             language,
@@ -143,19 +213,46 @@ export const analyzeCode = async (code, language, options = {}) => {
               verbosity: 'detailed'
             }
           }),
-          headers: {
-            'Content-Type': 'application/json',
-          }
+        }).then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
         });
       } catch (fallbackError) {
-        console.error('Localhost fallback also failed:', fallbackError);
-        throw error; // Throw original error
+        console.error('💥 Localhost fallback also failed:', fallbackError);
       }
     }
     throw error;
   }
 };
 
+// FIXED: User profile functions matching your backend
+export const getUserProfile = async () => {
+  return await apiCall(API_ENDPOINTS.GET_PROFILE);
+};
+
+export const updateUserPreferences = async (preferences) => {
+  return await apiCall(API_ENDPOINTS.UPDATE_PREFERENCES, {
+    method: 'POST',
+    body: JSON.stringify(preferences),
+  });
+};
+
+export const updateUserProfile = async (profileData) => {
+  return await apiCall(API_ENDPOINTS.UPDATE_PROFILE, {
+    method: 'PUT',
+    body: JSON.stringify(profileData),
+  });
+};
+
+export const getUserDashboard = async () => {
+  return await apiCall(API_ENDPOINTS.GET_DASHBOARD);
+};
+
+export const getUserActivity = async (page = 1, limit = 20) => {
+  return await apiCall(`${API_ENDPOINTS.GET_ACTIVITY}?page=${page}&limit=${limit}`);
+};
+
+// Other API functions
 export const getLanguages = async () => {
   return await apiCall(API_ENDPOINTS.GET_LANGUAGES);
 };
@@ -167,32 +264,31 @@ export const detectLanguage = async (code) => {
   });
 };
 
-// Test connection to backend
-export const testConnection = async () => {
+export const logoutUser = async () => {
   try {
-    const response = await apiCall(API_ENDPOINTS.TEST_ENV);
-    console.log('Backend connection test:', response);
+    await apiCall(API_ENDPOINTS.LOGOUT, { method: 'POST' });
+  } catch (error) {
+    console.error('Logout API call failed:', error);
+  } finally {
+    clearAuthToken();
+  }
+};
+
+// Health check
+export const checkHealth = async () => {
+  try {
+    const response = await apiCall(API_ENDPOINTS.HEALTH);
+    console.log('🏥 Backend health:', response);
     return response;
   } catch (error) {
-    console.error('Backend connection failed:', error);
+    console.error('💀 Backend health check failed:', error);
     throw error;
   }
 };
 
-// ADDED: Helper function to get user profile
-export const getUserProfile = async () => {
-  return await apiCall(API_ENDPOINTS.GET_PROFILE);
-};
+// Export token management functions
+export { getAuthToken, setAuthToken, clearAuthToken };
 
-// ADDED: Helper function to update preferences
-export const updateUserPreferences = async (preferences) => {
-  return await apiCall(API_ENDPOINTS.UPDATE_PREFERENCES, {
-    method: 'POST',
-    body: JSON.stringify(preferences),
-  });
-};
-
-// Export the base URL for use in other components
 export { API_BASE_URL };
 
 export default {
@@ -201,8 +297,17 @@ export default {
   analyzeCode,
   getLanguages,
   detectLanguage,
-  testConnection,
+  authenticateUser,
+  getCurrentUser,
   getUserProfile,
   updateUserPreferences,
+  updateUserProfile,
+  getUserDashboard,
+  getUserActivity,
+  logoutUser,
+  checkHealth,
+  getAuthToken,
+  setAuthToken,
+  clearAuthToken,
   API_BASE_URL
 };

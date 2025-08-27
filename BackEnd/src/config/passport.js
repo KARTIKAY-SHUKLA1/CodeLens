@@ -17,8 +17,8 @@ module.exports = function(passport) {
     clientID: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.NODE_ENV === 'production' 
-  ? "https://codelens-backend-0xl0.onrender.com/api/auth/github/callback"
-  : "/api/auth/github/callback"
+      ? "https://codelens-backend-0xl0.onrender.com/api/auth/github/callback"
+      : "/api/auth/github/callback"
   },
   async (accessToken, refreshToken, profile, done) => {
     try {
@@ -59,6 +59,7 @@ module.exports = function(passport) {
           return done(updateError, null);
         }
 
+        console.log('Existing user authenticated:', updatedUser.id);
         return done(null, updatedUser);
       } else {
         // Create new user
@@ -86,7 +87,7 @@ module.exports = function(passport) {
           return done(createError, null);
         }
 
-        console.log('New user created:', newUser);
+        console.log('New user created:', newUser.id);
         return done(null, newUser);
       }
     } catch (error) {
@@ -95,31 +96,57 @@ module.exports = function(passport) {
     }
   }));
 
-  // JWT Strategy for API authentication
+  // FIXED: JWT Strategy for API authentication with better error handling and flexible payload support
   passport.use(new JwtStrategy({
     jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-    secretOrKey: process.env.JWT_SECRET
+    secretOrKey: process.env.JWT_SECRET,
+    // ADDED: Handle missing JWT_SECRET more gracefully
+    passReqToCallback: false
   },
   async (jwtPayload, done) => {
     try {
+      console.log('JWT Strategy - Payload received:', jwtPayload);
+
+      // FIXED: Support multiple possible payload structures
+      let userId;
+      if (jwtPayload.userId) {
+        userId = jwtPayload.userId;
+      } else if (jwtPayload.id) {
+        userId = jwtPayload.id;
+      } else if (jwtPayload.sub) {
+        userId = jwtPayload.sub;  // Standard JWT subject claim
+      } else {
+        console.error('JWT Strategy - No user ID found in payload:', Object.keys(jwtPayload));
+        return done(null, false, { message: 'Invalid token payload structure' });
+      }
+
+      console.log('JWT Strategy - Looking up user ID:', userId);
+
       const { data: user, error } = await supabase
         .from('users')
         .select('*')
-        .eq('id', jwtPayload.userId)
+        .eq('id', userId)
         .single();
 
       if (error) {
-        console.error('JWT Strategy error:', error);
+        if (error.code === 'PGRST116') {
+          // User not found
+          console.error('JWT Strategy - User not found:', userId);
+          return done(null, false, { message: 'User not found' });
+        }
+        console.error('JWT Strategy - Database error:', error);
         return done(error, false);
       }
 
       if (user) {
+        console.log('JWT Strategy - User authenticated:', user.id);
         return done(null, user);
       } else {
-        return done(null, false);
+        console.error('JWT Strategy - No user returned from database');
+        return done(null, false, { message: 'Authentication failed' });
       }
     } catch (error) {
-      console.error('JWT Strategy catch error:', error);
+      console.error('JWT Strategy - Unexpected error:', error);
       return done(error, false);
     }
   }));
@@ -149,4 +176,13 @@ module.exports = function(passport) {
       done(error, null);
     }
   });
+
+  // ADDED: Helper function to validate JWT_SECRET exists
+  if (!process.env.JWT_SECRET) {
+    console.error('CRITICAL: JWT_SECRET environment variable is not set!');
+    console.error('This will cause all JWT authentication to fail.');
+    console.error('Please set JWT_SECRET in your environment variables.');
+  } else {
+    console.log('JWT_SECRET is configured');
+  }
 };

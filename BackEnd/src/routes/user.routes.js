@@ -10,8 +10,56 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY || process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || ''
 );
 
-// Middleware to authenticate all user routes
-router.use(passport.authenticate('jwt', { session: false }));
+// FIXED: Better authentication middleware with error handling
+router.use(async (req, res, next) => {
+  try {
+    // Extract token from Authorization header
+    const authHeader = req.headers.authorization;
+    console.log('Auth header:', authHeader ? 'Present' : 'Missing');
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'No authentication token provided',
+        error: 'MISSING_TOKEN'
+      });
+    }
+
+    // Use passport JWT authentication
+    passport.authenticate('jwt', { session: false }, (error, user, info) => {
+      if (error) {
+        console.error('Passport JWT error:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Authentication error',
+          error: 'AUTH_ERROR'
+        });
+      }
+
+      if (!user) {
+        console.error('JWT authentication failed:', info);
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired token',
+          error: 'INVALID_TOKEN',
+          details: info?.message
+        });
+      }
+
+      // Successfully authenticated - set user on request
+      req.user = user;
+      console.log('Authenticated user:', user.id);
+      next();
+    })(req, res, next);
+
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Authentication middleware error'
+    });
+  }
+});
 
 // Validation schemas
 const updateProfileSchema = Joi.object({
@@ -35,6 +83,17 @@ const preferencesSchema = Joi.object({
 // @access  Private
 router.get('/profile', async (req, res) => {
   try {
+    console.log('Getting profile for user ID:', req.user?.id);
+    
+    // FIXED: Better error handling for missing user
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated',
+        error: 'NO_USER_ID'
+      });
+    }
+
     const { data: user, error } = await supabase
       .from('users')
       .select(`
@@ -46,9 +105,11 @@ router.get('/profile', async (req, res) => {
       .single();
 
     if (error) {
+      console.error('Supabase error getting user:', error);
       return res.status(404).json({
         success: false,
-        message: 'User profile not found'
+        message: 'User profile not found',
+        error: 'USER_NOT_FOUND'
       });
     }
 
@@ -93,6 +154,8 @@ router.get('/profile', async (req, res) => {
       preferences: user.preferences
     };
 
+    console.log('Returning user profile:', formattedUser.id);
+    
     res.json({
       success: true,
       user: formattedUser,
@@ -109,16 +172,28 @@ router.get('/profile', async (req, res) => {
     console.error('Get profile error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get user profile'
+      message: 'Failed to get user profile',
+      error: 'SERVER_ERROR'
     });
   }
 });
 
-// @route   POST /api/users/preferences (NEW - Required by frontend)
+// @route   POST /api/users/preferences (Required by frontend)
 // @desc    Save user preferences from onboarding
 // @access  Private
 router.post('/preferences', async (req, res) => {
   try {
+    console.log('Saving preferences for user ID:', req.user?.id);
+    
+    // FIXED: Better error handling for missing user
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated',
+        error: 'NO_USER_ID'
+      });
+    }
+
     const { error: validationError, value } = preferencesSchema.validate(req.body);
     
     if (validationError) {
@@ -141,8 +216,11 @@ router.post('/preferences', async (req, res) => {
       .single();
 
     if (error) {
+      console.error('Supabase error updating preferences:', error);
       throw error;
     }
+
+    console.log('Preferences saved successfully for user:', updatedUser.id);
 
     res.json({
       success: true,
@@ -165,7 +243,8 @@ router.post('/preferences', async (req, res) => {
     console.error('Save preferences error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to save preferences'
+      message: 'Failed to save preferences',
+      error: 'SERVER_ERROR'
     });
   }
 });
@@ -175,6 +254,13 @@ router.post('/preferences', async (req, res) => {
 // @access  Private
 router.put('/profile', async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
+
     const { error: validationError, value } = updateProfileSchema.validate(req.body);
     
     if (validationError) {
@@ -221,6 +307,13 @@ router.put('/profile', async (req, res) => {
 // @access  Private
 router.get('/dashboard', async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
+
     const userId = req.user.id;
 
     // Get recent reviews
@@ -320,6 +413,13 @@ router.get('/dashboard', async (req, res) => {
 // @access  Private
 router.get('/activity', async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
@@ -370,6 +470,13 @@ router.get('/activity', async (req, res) => {
 // @access  Private
 router.post('/upgrade', async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
+
     const { plan } = req.body;
 
     if (!['pro'].includes(plan)) {
