@@ -4,11 +4,24 @@ const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 const { createClient } = require('@supabase/supabase-js');
 
-// Initialize Supabase with correct keys
+// Initialize Supabase with SERVICE_KEY and proper configuration to bypass RLS
 const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://db.oqrnlnvrrnugkxhjixyr.supabase.co',
-  // FIXED: Use SUPABASE_ANON_KEY for client operations, not SERVICE_KEY
-  process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_KEY
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    },
+    db: {
+      schema: 'public'
+    },
+    global: {
+      headers: {
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`
+      }
+    }
+  }
 );
 
 module.exports = function(passport) {
@@ -19,11 +32,11 @@ module.exports = function(passport) {
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.NODE_ENV === 'production' 
       ? "https://codelens-backend-0xl0.onrender.com/api/auth/github/callback"
-      : "http://localhost:5000/api/auth/github/callback" // FIXED: Added protocol
+      : "http://localhost:5000/api/auth/github/callback"
   },
   async (accessToken, refreshToken, profile, done) => {
     try {
-      console.log('🔍 GitHub OAuth Profile:', {
+      console.log('GitHub OAuth Profile:', {
         id: profile.id,
         username: profile.username,
         email: profile.emails?.[0]?.value,
@@ -38,7 +51,7 @@ module.exports = function(passport) {
         .single();
 
       if (findError && findError.code !== 'PGRST116') {
-        console.error('❌ Error finding user:', findError);
+        console.error('Error finding user:', findError);
         return done(findError, null);
       }
 
@@ -56,14 +69,14 @@ module.exports = function(passport) {
           .single();
 
         if (updateError) {
-          console.error('❌ Error updating user:', updateError);
+          console.error('Error updating user:', updateError);
           return done(updateError, null);
         }
 
-        console.log('✅ Existing user authenticated:', updatedUser.id);
+        console.log('Existing user authenticated:', updatedUser.id);
         return done(null, updatedUser);
       } else {
-        // Create new user
+        // Create new user - using direct insert with service key
         const newUserData = {
           github_id: profile.id,
           username: profile.username,
@@ -74,8 +87,12 @@ module.exports = function(passport) {
           plan: 'free',
           credits_used: 0,
           credits_limit: 100,
-          last_login: new Date().toISOString()
+          last_login: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         };
+
+        console.log('Creating new user with data:', { ...newUserData, github_id: newUserData.github_id });
 
         const { data: newUser, error: createError } = await supabase
           .from('users')
@@ -84,31 +101,31 @@ module.exports = function(passport) {
           .single();
 
         if (createError) {
-          console.error('❌ Error creating user:', createError);
+          console.error('Error creating user:', createError);
+          console.error('User data that failed:', newUserData);
           return done(createError, null);
         }
 
-        console.log('✅ New user created:', newUser.id);
+        console.log('New user created successfully:', newUser.id);
         return done(null, newUser);
       }
     } catch (error) {
-      console.error('❌ GitHub OAuth error:', error);
+      console.error('GitHub OAuth error:', error);
       return done(error, null);
     }
   }));
 
-  // FIXED: JWT Strategy with proper error handling and validation
+  // JWT Strategy with proper error handling and validation
   passport.use(new JwtStrategy({
     jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-    secretOrKey: process.env.JWT_SECRET || 'fallback-jwt-secret-change-in-production',
-    // ADDED: Additional options for better error handling
-    algorithms: ['HS256'], // Explicitly specify algorithm
-    ignoreExpiration: false, // Respect token expiration
+    secretOrKey: process.env.JWT_SECRET,
+    algorithms: ['HS256'],
+    ignoreExpiration: false,
     passReqToCallback: false
   },
   async (jwtPayload, done) => {
     try {
-      console.log('🔑 JWT Strategy - Payload received:', {
+      console.log('JWT Strategy - Payload received:', {
         userId: jwtPayload.userId,
         id: jwtPayload.id,
         sub: jwtPayload.sub,
@@ -116,7 +133,7 @@ module.exports = function(passport) {
         iat: jwtPayload.iat
       });
 
-      // FIXED: More robust user ID extraction
+      // Extract user ID from payload
       let userId;
       if (jwtPayload.userId) {
         userId = jwtPayload.userId;
@@ -125,13 +142,13 @@ module.exports = function(passport) {
       } else if (jwtPayload.sub) {
         userId = jwtPayload.sub;
       } else {
-        console.error('❌ JWT Strategy - No user ID found in payload');
+        console.error('JWT Strategy - No user ID found in payload');
         return done(null, false, { message: 'Invalid token: missing user identifier' });
       }
 
-      console.log('🔍 JWT Strategy - Looking up user ID:', userId);
+      console.log('JWT Strategy - Looking up user ID:', userId);
 
-      // FIXED: Better query with error handling
+      // Get user from database
       const { data: user, error } = await supabase
         .from('users')
         .select(`
@@ -152,45 +169,45 @@ module.exports = function(passport) {
 
       if (error) {
         if (error.code === 'PGRST116') {
-          console.error('❌ JWT Strategy - User not found:', userId);
+          console.error('JWT Strategy - User not found:', userId);
           return done(null, false, { message: 'User not found' });
         }
-        console.error('❌ JWT Strategy - Database error:', error);
+        console.error('JWT Strategy - Database error:', error);
         return done(error, false);
       }
 
       if (!user) {
-        console.error('❌ JWT Strategy - No user data returned');
+        console.error('JWT Strategy - No user data returned');
         return done(null, false, { message: 'User data not found' });
       }
 
-      console.log('✅ JWT Strategy - User authenticated:', user.id);
+      console.log('JWT Strategy - User authenticated:', user.id);
       
-      // ADDED: Update last seen timestamp
+      // Update last seen timestamp
       supabase
         .from('users')
         .update({ last_login: new Date().toISOString() })
         .eq('id', user.id)
-        .then(() => console.log('📊 User last_login updated'))
-        .catch(err => console.error('⚠️ Failed to update last_login:', err));
+        .then(() => console.log('User last_login updated'))
+        .catch(err => console.error('Failed to update last_login:', err));
 
       return done(null, user);
     } catch (error) {
-      console.error('❌ JWT Strategy - Unexpected error:', error);
+      console.error('JWT Strategy - Unexpected error:', error);
       return done(error, false);
     }
   }));
 
-  // Serialize user for session (for OAuth flow)
+  // Serialize user for session
   passport.serializeUser((user, done) => {
-    console.log('📦 Serializing user:', user.id);
+    console.log('Serializing user:', user.id);
     done(null, user.id);
   });
 
-  // Deserialize user from session (for OAuth flow)
+  // Deserialize user from session
   passport.deserializeUser(async (id, done) => {
     try {
-      console.log('📤 Deserializing user ID:', id);
+      console.log('Deserializing user ID:', id);
       
       const { data: user, error } = await supabase
         .from('users')
@@ -199,45 +216,41 @@ module.exports = function(passport) {
         .single();
 
       if (error) {
-        console.error('❌ Deserialize user error:', error);
+        console.error('Deserialize user error:', error);
         return done(error, null);
       }
 
       if (!user) {
-        console.error('❌ Deserialize - No user found');
+        console.error('Deserialize - No user found');
         return done(null, false);
       }
 
-      console.log('✅ User deserialized:', user.id);
+      console.log('User deserialized:', user.id);
       done(null, user);
     } catch (error) {
-      console.error('❌ Deserialize user catch error:', error);
+      console.error('Deserialize user catch error:', error);
       done(error, null);
     }
   });
 
-  // ADDED: Environment validation and startup checks
-  console.log('🔧 Passport Configuration Status:');
+  // Environment validation
+  console.log('Passport Configuration Status:');
   
   if (!process.env.JWT_SECRET) {
-    console.error('🚨 CRITICAL: JWT_SECRET environment variable is not set!');
-    console.error('   This will cause all JWT authentication to fail.');
-    console.error('   Please set JWT_SECRET in your environment variables.');
+    console.error('CRITICAL: JWT_SECRET environment variable is not set!');
   } else {
-    console.log('✅ JWT_SECRET is configured');
+    console.log('JWT_SECRET is configured');
   }
 
   if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
-    console.warn('⚠️ WARNING: GitHub OAuth credentials not configured');
-    console.warn('   GitHub authentication will not work');
+    console.warn('WARNING: GitHub OAuth credentials not configured');
   } else {
-    console.log('✅ GitHub OAuth is configured');
+    console.log('GitHub OAuth is configured');
   }
 
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
-    console.error('🚨 CRITICAL: Supabase credentials not properly configured');
-    console.error('   Database operations will fail');
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    console.error('CRITICAL: Supabase credentials not properly configured');
   } else {
-    console.log('✅ Supabase is configured');
+    console.log('Supabase is configured');
   }
 };

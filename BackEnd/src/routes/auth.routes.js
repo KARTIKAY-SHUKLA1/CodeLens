@@ -4,13 +4,27 @@ const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const router = express.Router();
 
-// Initialize Supabase - FIXED: Use correct environment variables
+// Initialize Supabase with SERVICE_KEY and proper configuration to bypass RLS
 const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://db.oqrnlnvrrnugkxhjixyr.supabase.co',
-  process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || ''
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    },
+    db: {
+      schema: 'public'
+    },
+    global: {
+      headers: {
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`
+      }
+    }
+  }
 );
 
-// IMPROVED: Generate JWT token with better payload
+// Generate JWT token with better payload
 const generateToken = (user) => {
   if (!process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET environment variable is not set');
@@ -18,8 +32,8 @@ const generateToken = (user) => {
   
   return jwt.sign(
     { 
-      userId: user.id,  // This is what your JWT strategy expects
-      id: user.id,      // Backup field
+      userId: user.id,
+      id: user.id,
       username: user.username,
       email: user.email,
       plan: user.plan || 'free'
@@ -72,14 +86,13 @@ router.get('/github/callback',
           .insert([{
             user_id: req.user.id,
             session_token: token,
-            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             ip_address: req.ip || req.connection.remoteAddress,
             user_agent: req.get('user-agent') || 'Unknown'
           }]);
         console.log('Session created successfully');
       } catch (sessionError) {
         console.warn('Failed to create session record:', sessionError.message);
-        // Don't fail the whole auth flow if session creation fails
       }
 
       // Redirect to frontend with token
@@ -127,7 +140,7 @@ router.post('/github/callback', async (req, res) => {
 
     console.log('Exchanging code for access token...');
 
-    // IMPROVED: Better error handling for GitHub API calls
+    // Exchange code for access token
     const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
@@ -205,7 +218,7 @@ router.post('/github/callback', async (req, res) => {
       .eq('github_id', githubUser.id)
       .single();
 
-    if (findError && findError.code !== 'PGRST116') { // PGRST116 = no rows returned
+    if (findError && findError.code !== 'PGRST116') {
       console.error('Error finding existing user:', findError);
       throw findError;
     }
@@ -234,26 +247,31 @@ router.post('/github/callback', async (req, res) => {
       user = updatedUser;
     } else {
       console.log('Creating new user for GitHub ID:', githubUser.id);
-      // Create new user
+      // Create new user with proper data structure
+      const newUserData = {
+        github_id: githubUser.id,
+        username: githubUser.login,
+        name: githubUser.name || githubUser.login,
+        email: primaryEmail,
+        avatar_url: githubUser.avatar_url,
+        github_profile_url: `https://github.com/${githubUser.login}`,
+        plan: 'free',
+        credits_used: 0,
+        credits_limit: 100,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_login: new Date().toISOString()
+      };
+
       const { data: newUser, error: createError } = await supabase
         .from('users')
-        .insert({
-          github_id: githubUser.id,
-          username: githubUser.login,
-          name: githubUser.name || githubUser.login,
-          email: primaryEmail,
-          avatar_url: githubUser.avatar_url,
-          plan: 'free',
-          credits_used: 0,
-          credits_limit: 100,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
+        .insert([newUserData])
         .select()
         .single();
 
       if (createError) {
         console.error('Error creating user:', createError);
+        console.error('User data that failed:', newUserData);
         throw createError;
       }
       user = newUser;
@@ -412,7 +430,6 @@ router.post('/logout', async (req, res) => {
     
     if (token) {
       console.log('Invalidating session...');
-      // Remove session from database
       try {
         await supabase
           .from('user_sessions')
@@ -469,7 +486,7 @@ router.get('/me', passport.authenticate('jwt', { session: false }), async (req, 
 
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, username, name, email, avatar_url, plan, credits_used, credits_limit, created_at, last_login, preferences')
+      .select('id, username, name, email, avatar_url, plan, credits_used, credits_limit, created_at, last_login, bio')
       .eq('id', req.user.id)
       .single();
 
@@ -496,7 +513,7 @@ router.get('/me', passport.authenticate('jwt', { session: false }), async (req, 
         reviewsUsed: user.credits_used || 0,
         reviewsLimit: user.credits_limit || 100,
         isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
-        preferences: user.preferences || {}
+        bio: user.bio || ''
       }
     });
 
