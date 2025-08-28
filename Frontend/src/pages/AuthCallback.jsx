@@ -1,9 +1,11 @@
+// src/pages/AuthCallback.jsx - CORRECTED VERSION
 import React, { useEffect, useState } from 'react';
 import { API_ENDPOINTS } from "../config/api";
 
 const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
   const [status, setStatus] = useState('processing');
   const [error, setError] = useState(null);
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -28,10 +30,45 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
           errorMessage
         });
 
-        // ADDED: Handle auth error redirects from backend
+        // ENHANCED: Handle different types of auth errors from backend
         if (urlError) {
           console.error('Auth error from backend:', urlError, errorMessage);
-          setError(errorMessage || `Authentication failed: ${urlError}`);
+          
+          let userFriendlyMessage = errorMessage;
+          let shouldRetry = false;
+          
+          switch (urlError) {
+            case 'invalid_state':
+              userFriendlyMessage = 'Security validation failed. This may happen if you waited too long or opened multiple sign-in tabs.';
+              shouldRetry = true;
+              break;
+            case 'state_expired':
+              userFriendlyMessage = 'Sign-in session expired. Please try again.';
+              shouldRetry = true;
+              break;
+            case 'no_code':
+              userFriendlyMessage = 'GitHub did not provide authorization. Please try signing in again.';
+              shouldRetry = true;
+              break;
+            case 'token_exchange_failed':
+              userFriendlyMessage = 'Failed to connect with GitHub. Please try again.';
+              shouldRetry = true;
+              break;
+            case 'database_error':
+              userFriendlyMessage = 'Database error occurred. Please try again or contact support.';
+              shouldRetry = true;
+              break;
+            case 'callback_failed':
+              userFriendlyMessage = 'Authentication failed due to server error. Please try again.';
+              shouldRetry = true;
+              break;
+            default:
+              userFriendlyMessage = errorMessage || `Authentication failed: ${urlError}`;
+              shouldRetry = true;
+          }
+          
+          setError(userFriendlyMessage);
+          setMessage(shouldRetry ? 'You can try signing in again.' : '');
           setStatus('error');
           
           // Auto redirect after showing error
@@ -40,21 +77,29 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
               onNavigate('home');
             }
             window.history.replaceState({}, document.title, window.location.pathname);
-          }, 4000);
+          }, 5000);
           return;
         }
 
-        // ADDED: Handle successful auth redirect from backend (with token in URL)
+        // ENHANCED: Handle successful auth redirect from backend (with token in URL)
         if (token && userDataParam) {
           console.log('Direct auth success from backend redirect');
+          setStatus('authenticating');
+          
           try {
             const userData = JSON.parse(decodeURIComponent(userDataParam));
+            
+            // Validate user data
+            if (!userData.id || !userData.name) {
+              throw new Error('Invalid user data received from server');
+            }
             
             // Store auth data
             localStorage.setItem('auth_token', token);
             localStorage.setItem('user_data', JSON.stringify(userData));
             
             setStatus('success');
+            setMessage(isNewUser ? 'Welcome to CodeLens!' : 'Welcome back!');
             
             // Call auth success callback
             if (onAuthSuccess) {
@@ -62,6 +107,7 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
                 await onAuthSuccess(userData);
               } catch (callbackError) {
                 console.warn('Auth success callback failed:', callbackError);
+                // Don't fail the whole auth process if callback fails
               }
             }
             
@@ -76,22 +122,30 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
             return;
           } catch (parseError) {
             console.error('Failed to parse user data from URL:', parseError);
-            setError('Failed to process authentication data');
+            setError('Failed to process authentication data from server');
             setStatus('error');
+            setTimeout(() => {
+              if (onNavigate) {
+                onNavigate('home');
+              }
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }, 4000);
             return;
           }
         }
 
         // Original OAuth callback handling (code-based)
         if (code) {
-          console.log('Processing OAuth callback with code');
+          console.log('Processing OAuth callback with authorization code');
           setStatus('authenticating');
+          setMessage('Exchanging authorization code for access token...');
 
           const response = await fetch(API_ENDPOINTS.GITHUB_CALLBACK, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
+            credentials: 'include', // Include cookies for session
             body: JSON.stringify({
               code,
               ...(state && { state })
@@ -102,7 +156,25 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
             let errorMessage;
             try {
               const errorData = await response.json();
-              errorMessage = errorData.message || errorData.error || `HTTP ${response.status}`;
+              console.error('API callback error:', errorData);
+              
+              // Handle specific API errors
+              switch (errorData.error) {
+                case 'INVALID_STATE':
+                  errorMessage = 'Security validation failed. Please try signing in again.';
+                  break;
+                case 'TOKEN_EXCHANGE_FAILED':
+                  errorMessage = 'Failed to connect with GitHub. Please check your connection and try again.';
+                  break;
+                case 'USER_DATA_FAILED':
+                  errorMessage = 'Failed to retrieve your GitHub profile. Please try again.';
+                  break;
+                case 'AUTH_FAILED':
+                  errorMessage = 'Authentication failed. Please try again.';
+                  break;
+                default:
+                  errorMessage = errorData.message || errorData.error || `HTTP ${response.status}`;
+              }
             } catch (e) {
               errorMessage = `Authentication failed with status ${response.status}`;
             }
@@ -110,7 +182,15 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
           }
 
           const data = await response.json();
-          console.log('Auth callback response:', data);
+          console.log('Auth callback response success:', { 
+            hasToken: !!data.token, 
+            hasUser: !!data.user,
+            isNewUser: data.isNewUser 
+          });
+
+          if (!data.success) {
+            throw new Error(data.message || 'Authentication was not successful');
+          }
 
           if (!data.token) {
             throw new Error('No authentication token received from server');
@@ -125,12 +205,14 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
           localStorage.setItem('user_data', JSON.stringify(data.user));
 
           setStatus('success');
+          setMessage(data.isNewUser ? 'Account created successfully!' : 'Welcome back!');
           
           if (onAuthSuccess) {
             try {
               await onAuthSuccess(data.user);
             } catch (callbackError) {
               console.warn('Auth success callback failed:', callbackError);
+              // Don't fail the whole auth process if callback fails
             }
           }
           
@@ -145,7 +227,7 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
         }
 
         // No code, token, or error - invalid callback
-        console.error('Invalid auth callback - no code or token found');
+        console.error('Invalid auth callback - no authorization data found');
         setError('Invalid authentication callback. Please try signing in again.');
         setStatus('error');
         
@@ -165,17 +247,20 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
         
         setError(error.message);
         setStatus('error');
+        setMessage('Please try signing in again from the home page.');
         
         setTimeout(() => {
           if (onNavigate) {
             onNavigate('home');
           }
           window.history.replaceState({}, document.title, window.location.pathname);
-        }, 4000);
+        }, 5000);
       }
     };
 
-    handleCallback();
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(handleCallback, 100);
+    return () => clearTimeout(timer);
   }, [onNavigate, onAuthSuccess]);
 
   // Simple CSS loading spinner
@@ -192,10 +277,10 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
           <div className="text-center">
             <LoadingSpinner />
             <h2 className="text-xl font-semibold text-gray-800 mt-4">
-              Processing authentication...
+              Processing Authentication
             </h2>
             <p className="text-gray-600 mt-2">
-              Please wait while we verify your GitHub account
+              Validating your GitHub credentials...
             </p>
           </div>
         );
@@ -205,10 +290,10 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
           <div className="text-center">
             <LoadingSpinner />
             <h2 className="text-xl font-semibold text-gray-800 mt-4">
-              Signing you in...
+              Signing You In
             </h2>
             <p className="text-gray-600 mt-2">
-              Creating your CodeLens profile
+              {message || 'Creating your CodeLens profile...'}
             </p>
           </div>
         );
@@ -224,7 +309,10 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
             <h2 className="text-xl font-semibold text-green-800 mt-4">
               Authentication Successful!
             </h2>
-            <p className="text-green-600 mt-2">
+            <p className="text-green-600 mt-2 mb-2">
+              {message || 'You have been signed in successfully.'}
+            </p>
+            <p className="text-gray-500 text-sm">
               Redirecting to your dashboard...
             </p>
           </div>
@@ -241,25 +329,32 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
             <h2 className="text-xl font-semibold text-red-800 mt-4">
               Authentication Failed
             </h2>
-            <p className="text-red-600 mt-2 mb-4">
+            <p className="text-red-600 mt-2 mb-4 text-sm max-w-md mx-auto">
               {error || 'Something went wrong during authentication'}
             </p>
             
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-left">
-              <p className="text-red-700 font-medium mb-1">Common solutions:</p>
-              <ul className="text-red-600 text-xs space-y-1">
-                <li>• Clear your browser cookies and try again</li>
-                <li>• Make sure you're connected to the internet</li>
-                <li>• Try signing in again from the home page</li>
-                <li>• Contact support if the problem persists</li>
+            {message && (
+              <p className="text-gray-600 text-sm mb-4">
+                {message}
+              </p>
+            )}
+            
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-left max-w-md mx-auto mb-4">
+              <p className="text-red-700 font-medium mb-2">Troubleshooting tips:</p>
+              <ul className="text-red-600 text-xs space-y-1 list-disc list-inside">
+                <li>Clear your browser cookies and try again</li>
+                <li>Make sure you're connected to the internet</li>
+                <li>Try using an incognito/private browser window</li>
+                <li>Disable browser extensions temporarily</li>
+                <li>Contact support if the problem persists</li>
               </ul>
             </div>
             
-            <p className="text-gray-500 text-sm mt-4">
+            <p className="text-gray-500 text-sm mb-4">
               Redirecting to home page in a few seconds...
             </p>
             
-            <div className="flex gap-2 justify-center mt-4">
+            <div className="flex gap-2 justify-center">
               <button
                 onClick={() => onNavigate && onNavigate('home')}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
@@ -277,7 +372,11 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
         );
 
       default:
-        return null;
+        return (
+          <div className="text-center">
+            <p className="text-gray-600">Loading...</p>
+          </div>
+        );
     }
   };
 

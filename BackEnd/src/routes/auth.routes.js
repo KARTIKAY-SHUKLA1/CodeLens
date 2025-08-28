@@ -1,7 +1,9 @@
+// src/routes/auth.routes.js - CORRECTED VERSION
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { authenticateToken } = require('../middleware/auth.middleware');
+const crypto = require('crypto');
 
 const router = express.Router();
 
@@ -21,6 +23,20 @@ const supabase = createClient(
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
 const FRONTEND_URL = process.env.CORS_ORIGIN || 'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://codelens-backend-0xl0.onrender.com';
+
+// FIX: Simple in-memory store for OAuth states (use Redis in production)
+const oauthStates = new Map();
+
+// Clean up expired states every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, data] of oauthStates.entries()) {
+    if (now - data.timestamp > 10 * 60 * 1000) { // 10 minutes
+      oauthStates.delete(state);
+    }
+  }
+}, 10 * 60 * 1000);
 
 // @route   GET /api/auth/github
 // @desc    Initiate GitHub OAuth
@@ -38,19 +54,28 @@ router.get('/github', (req, res) => {
       });
     }
 
-    // Generate state parameter for security
-    const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    // FIX: Generate cryptographically secure state parameter
+    const state = crypto.randomBytes(32).toString('hex');
     
-    // Store state in session (you might want to store this in Redis or database for production)
-    req.session.oauthState = state;
+    // FIX: Store state with timestamp (not in session which might not persist)
+    oauthStates.set(state, {
+      timestamp: Date.now(),
+      ip: req.ip || req.connection.remoteAddress,
+      userAgent: req.headers['user-agent']
+    });
 
+    const redirectUri = `${BACKEND_URL}/api/auth/github/callback`;
+    
     const githubAuthURL = `https://github.com/login/oauth/authorize?` +
       `client_id=${GITHUB_CLIENT_ID}&` +
-      `redirect_uri=${encodeURIComponent(process.env.BACKEND_URL || 'https://codelens-backend-0xl0.onrender.com')}/api/auth/github/callback&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
       `scope=user:email&` +
       `state=${state}`;
 
     console.log('🔗 Redirecting to GitHub OAuth:', githubAuthURL);
+    console.log('📝 State generated:', state);
+    console.log('🔙 Redirect URI:', redirectUri);
+    
     res.redirect(githubAuthURL);
 
   } catch (error) {
@@ -72,6 +97,12 @@ router.get('/github/callback', async (req, res) => {
     
     const { code, state, error } = req.query;
     
+    console.log('📥 Callback params:', { 
+      code: !!code, 
+      state: state?.substring(0, 8) + '...', 
+      error 
+    });
+    
     if (error) {
       console.error('❌ GitHub OAuth error:', error);
       return res.redirect(`${FRONTEND_URL}/auth/callback?error=${encodeURIComponent(error)}&message=${encodeURIComponent('GitHub OAuth error')}`);
@@ -82,11 +113,26 @@ router.get('/github/callback', async (req, res) => {
       return res.redirect(`${FRONTEND_URL}/auth/callback?error=no_code&message=${encodeURIComponent('No authorization code received from GitHub')}`);
     }
 
-    // Verify state parameter
-    if (state !== req.session.oauthState) {
-      console.error('❌ Invalid state parameter');
+    // FIX: Verify state parameter from our store
+    if (!state || !oauthStates.has(state)) {
+      console.error('❌ Invalid state parameter:', state);
+      console.log('📋 Available states:', Array.from(oauthStates.keys()).map(s => s.substring(0, 8) + '...'));
       return res.redirect(`${FRONTEND_URL}/auth/callback?error=invalid_state&message=${encodeURIComponent('Invalid state parameter - possible security issue')}`);
     }
+
+    // Additional security: check if state was created recently (10 minutes max)
+    const stateData = oauthStates.get(state);
+    const stateAge = Date.now() - stateData.timestamp;
+    if (stateAge > 10 * 60 * 1000) { // 10 minutes
+      console.error('❌ State parameter expired:', stateAge / 1000, 'seconds old');
+      oauthStates.delete(state);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=state_expired&message=${encodeURIComponent('Authentication session expired - please try again')}`);
+    }
+
+    console.log('✅ State parameter validated');
+    
+    // Clean up used state
+    oauthStates.delete(state);
 
     console.log('✅ Authorization code received, exchanging for access token');
 
@@ -211,7 +257,7 @@ router.get('/github/callback', async (req, res) => {
       console.log('✅ New user created:', user.id);
     }
 
-    // Generate JWT token
+    // Generate JWT token with proper expiration
     const jwtPayload = {
       userId: user.id,
       id: user.id, // For backward compatibility
@@ -224,9 +270,6 @@ router.get('/github/callback', async (req, res) => {
     const token = jwt.sign(jwtPayload, process.env.JWT_SECRET);
 
     console.log('✅ JWT token generated for user:', user.id);
-
-    // Clear OAuth state
-    delete req.session.oauthState;
 
     // Redirect to frontend with token and user data
     const callbackUrl = `${FRONTEND_URL}/auth/callback?` +
@@ -267,6 +310,18 @@ router.post('/github/callback', async (req, res) => {
         error: 'MISSING_CODE'
       });
     }
+
+    // Same validation as GET callback
+    if (!state || !oauthStates.has(state)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired state parameter',
+        error: 'INVALID_STATE'
+      });
+    }
+
+    // Clean up used state
+    oauthStates.delete(state);
 
     // Exchange code for access token (same logic as GET callback)
     const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {

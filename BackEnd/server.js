@@ -1,4 +1,4 @@
-// Load environment variables first
+// server.js - CORRECTED VERSION
 require('dotenv').config();
 
 // Validate required environment variables
@@ -12,6 +12,9 @@ if (missingEnvVars.length > 0) {
 
 const app = require('./src/app');
 
+// FIX: Set trust proxy BEFORE importing app
+app.set('trust proxy', 1);
+
 // Ensure PORT is a valid number
 const PORT = (() => {
   const parsed = parseInt(process.env.PORT, 10);
@@ -23,9 +26,11 @@ const PORT = (() => {
 })();
 
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server is running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 Backend URL: ${process.env.BACKEND_URL || `http://localhost:${PORT}`}`);
+  console.log(`🌐 Frontend URL: ${process.env.CORS_ORIGIN}`);
   
   // Log important config for debugging (only in development)
   if (process.env.NODE_ENV === 'development') {
@@ -45,6 +50,8 @@ const server = app.listen(PORT, () => {
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
     console.error(`❌ Port ${PORT} is already in use. Please use a different port.`);
+  } else if (error.code === 'EACCES') {
+    console.error(`❌ Permission denied to bind to port ${PORT}. Try using a port > 1024.`);
   } else {
     console.error('❌ Server startup error:', error);
   }
