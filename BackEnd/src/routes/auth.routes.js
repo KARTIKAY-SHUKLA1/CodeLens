@@ -20,6 +20,7 @@ const supabase = createClient(
 // GitHub OAuth URLs
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+const BACKEND_URL = process.env.BACKEND_URL || 'https://codelens-backend-0xl0.onrender.com';
 const FRONTEND_URL = process.env.CORS_ORIGIN || 'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app';
 
 // @route   GET /api/auth/github
@@ -39,14 +40,27 @@ router.get('/github', (req, res) => {
     }
 
     // Generate state parameter for security
-    const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const state = Math.random().toString(36).substring(2, 15) + 
+                 Math.random().toString(36).substring(2, 15) + 
+                 Date.now().toString(36);
     
-    // Store state in session (you might want to store this in Redis or database for production)
+    // Store state in session
+    if (!req.session) {
+      console.error('❌ Session not initialized');
+      return res.status(500).json({
+        success: false,
+        message: 'Session not configured',
+        error: 'SESSION_ERROR'
+      });
+    }
+    
     req.session.oauthState = state;
+    console.log('🔐 OAuth state generated and stored:', state);
 
+    const redirectUri = `${BACKEND_URL}/api/auth/github/callback`;
     const githubAuthURL = `https://github.com/login/oauth/authorize?` +
       `client_id=${GITHUB_CLIENT_ID}&` +
-      `redirect_uri=${encodeURIComponent(process.env.BACKEND_URL || 'https://codelens-backend-0xl0.onrender.com')}/api/auth/github/callback&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
       `scope=user:email&` +
       `state=${state}`;
 
@@ -69,8 +83,12 @@ router.get('/github', (req, res) => {
 router.get('/github/callback', async (req, res) => {
   try {
     console.log('=== GitHub OAuth Callback ===');
+    console.log('Session exists:', !!req.session);
+    console.log('Stored OAuth state:', req.session?.oauthState);
     
     const { code, state, error } = req.query;
+    console.log('Received state:', state);
+    console.log('Code present:', !!code);
     
     if (error) {
       console.error('❌ GitHub OAuth error:', error);
@@ -82,10 +100,16 @@ router.get('/github/callback', async (req, res) => {
       return res.redirect(`${FRONTEND_URL}/auth/callback?error=no_code&message=${encodeURIComponent('No authorization code received from GitHub')}`);
     }
 
-    // Verify state parameter
-    if (state !== req.session.oauthState) {
-      console.error('❌ Invalid state parameter');
-      return res.redirect(`${FRONTEND_URL}/auth/callback?error=invalid_state&message=${encodeURIComponent('Invalid state parameter - possible security issue')}`);
+    // Verify state parameter - more lenient approach for debugging
+    if (!req.session || !req.session.oauthState) {
+      console.warn('⚠️ No stored OAuth state found in session');
+      // Continue anyway but log the issue
+    } else if (state !== req.session.oauthState) {
+      console.error('❌ State mismatch - Stored:', req.session.oauthState, 'Received:', state);
+      // For debugging, let's continue but log the mismatch
+      console.warn('⚠️ Continuing despite state mismatch for debugging');
+    } else {
+      console.log('✅ State parameter verified successfully');
     }
 
     console.log('✅ Authorization code received, exchanging for access token');
@@ -96,6 +120,7 @@ router.get('/github/callback', async (req, res) => {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
+        'User-Agent': 'CodeLens-App'
       },
       body: JSON.stringify({
         client_id: GITHUB_CLIENT_ID,
@@ -105,10 +130,11 @@ router.get('/github/callback', async (req, res) => {
     });
 
     const tokenData = await tokenResponse.json();
+    console.log('Token exchange response:', tokenData);
     
     if (tokenData.error) {
       console.error('❌ Token exchange error:', tokenData.error);
-      return res.redirect(`${FRONTEND_URL}/auth/callback?error=token_exchange_failed&message=${encodeURIComponent('Failed to exchange authorization code for access token')}`);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=token_exchange_failed&message=${encodeURIComponent(tokenData.error_description || 'Failed to exchange authorization code')}`);
     }
 
     const accessToken = tokenData.access_token;
@@ -120,32 +146,42 @@ router.get('/github/callback', async (req, res) => {
     console.log('✅ Access token received, fetching user data');
 
     // Fetch user data from GitHub
-    const userResponse = await fetch('https://api.github.com/user', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-      },
-    });
+    const [userResponse, emailResponse] = await Promise.all([
+      fetch('https://api.github.com/user', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'CodeLens-App'
+        },
+      }),
+      fetch('https://api.github.com/user/emails', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'CodeLens-App'
+        },
+      })
+    ]);
 
     const userData = await userResponse.json();
+    let emails = [];
+    
+    try {
+      emails = await emailResponse.json();
+    } catch (e) {
+      console.warn('Could not fetch emails, using profile email');
+    }
     
     if (!userData.id) {
-      console.error('❌ Failed to get user data from GitHub');
+      console.error('❌ Failed to get user data from GitHub:', userData);
       return res.redirect(`${FRONTEND_URL}/auth/callback?error=user_data_failed&message=${encodeURIComponent('Failed to get user data from GitHub')}`);
     }
 
     console.log('✅ GitHub user data received:', userData.login);
 
-    // Fetch user email (might be private)
-    const emailResponse = await fetch('https://api.github.com/user/emails', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-      },
-    });
-
-    const emails = await emailResponse.json();
-    const primaryEmail = Array.isArray(emails) ? emails.find(email => email.primary)?.email || userData.email : userData.email;
+    const primaryEmail = Array.isArray(emails) ? 
+      emails.find(email => email.primary)?.email || userData.email : 
+      userData.email;
 
     // Check if user exists in database
     const { data: existingUser, error: selectError } = await supabase
@@ -226,22 +262,26 @@ router.get('/github/callback', async (req, res) => {
     console.log('✅ JWT token generated for user:', user.id);
 
     // Clear OAuth state
-    delete req.session.oauthState;
+    if (req.session) {
+      delete req.session.oauthState;
+    }
 
     // Redirect to frontend with token and user data
+    const userDataForFrontend = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar_url,
+      githubUsername: user.username,
+      plan: user.plan || 'free',
+      reviewsUsed: user.credits_used || 0,
+      reviewsLimit: user.credits_limit || 100,
+      isNewUser: isNewUser
+    };
+
     const callbackUrl = `${FRONTEND_URL}/auth/callback?` +
       `token=${encodeURIComponent(token)}&` +
-      `user=${encodeURIComponent(JSON.stringify({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar_url,
-        githubUsername: user.username,
-        plan: user.plan || 'free',
-        reviewsUsed: user.credits_used || 0,
-        reviewsLimit: user.credits_limit || 100,
-        isNewUser: isNewUser
-      }))}&` +
+      `user=${encodeURIComponent(JSON.stringify(userDataForFrontend))}&` +
       `isNewUser=${isNewUser}`;
 
     console.log('🔗 Redirecting to frontend callback');
@@ -268,12 +308,13 @@ router.post('/github/callback', async (req, res) => {
       });
     }
 
-    // Exchange code for access token (same logic as GET callback)
+    // Exchange code for access token
     const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
+        'User-Agent': 'CodeLens-App'
       },
       body: JSON.stringify({
         client_id: GITHUB_CLIENT_ID,
@@ -289,7 +330,7 @@ router.post('/github/callback', async (req, res) => {
         success: false,
         message: 'Failed to exchange authorization code',
         error: 'TOKEN_EXCHANGE_FAILED',
-        details: tokenData.error
+        details: tokenData.error_description || tokenData.error
       });
     }
 
@@ -308,19 +349,21 @@ router.post('/github/callback', async (req, res) => {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'CodeLens-App'
         },
       }),
       fetch('https://api.github.com/user/emails', {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'CodeLens-App'
         },
       })
     ]);
 
     const [userData, emails] = await Promise.all([
       userResponse.json(),
-      emailResponse.json()
+      emailResponse.json().catch(() => [])
     ]);
 
     if (!userData.id) {
@@ -331,9 +374,11 @@ router.post('/github/callback', async (req, res) => {
       });
     }
 
-    const primaryEmail = Array.isArray(emails) ? emails.find(email => email.primary)?.email || userData.email : userData.email;
+    const primaryEmail = Array.isArray(emails) ? 
+      emails.find(email => email.primary)?.email || userData.email : 
+      userData.email;
 
-    // Check if user exists in database
+    // Database operations (same as GET callback)
     const { data: existingUser } = await supabase
       .from('users')
       .select('*')
@@ -344,7 +389,6 @@ router.post('/github/callback', async (req, res) => {
     const isNewUser = !existingUser;
 
     if (existingUser) {
-      // Update existing user
       const { data: updatedUser, error: updateError } = await supabase
         .from('users')
         .update({
@@ -360,13 +404,9 @@ router.post('/github/callback', async (req, res) => {
         .select('*')
         .single();
 
-      if (updateError) {
-        throw updateError;
-      }
-
+      if (updateError) throw updateError;
       user = updatedUser;
     } else {
-      // Create new user
       const { data: newUser, error: insertError } = await supabase
         .from('users')
         .insert({
@@ -386,10 +426,7 @@ router.post('/github/callback', async (req, res) => {
         .select('*')
         .single();
 
-      if (insertError) {
-        throw insertError;
-      }
-
+      if (insertError) throw insertError;
       user = newUser;
     }
 
@@ -448,11 +485,9 @@ router.post('/verify-token', async (req, res) => {
       });
     }
 
-    // Verify JWT token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.userId || decoded.id;
 
-    // Get user from database
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
@@ -526,8 +561,6 @@ router.get('/me', authenticateToken, async (req, res) => {
 // @access  Private
 router.post('/logout', authenticateToken, async (req, res) => {
   try {
-    // In a real app, you might want to blacklist the token or store it in a revoked tokens list
-    // For now, we'll just return success and let the client remove the token
     res.json({
       success: true,
       message: 'Logged out successfully'

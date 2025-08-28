@@ -1,84 +1,39 @@
-// src/app.js - MAIN EXPRESS APPLICATION SETUP
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const passport = require('passport');
 const session = require('express-session');
-const rateLimit = require('express-rate-limit');
-
-// Import configuration
-require('./config/passport')(passport);
-
-// Import routes
-const authRoutes = require('./routes/auth.routes');
-const userRoutes = require('./routes/user.routes');
-const aiRoutes = require('./routes/ai.routes');
-const reviewRoutes = require('./routes/review.routes');
 
 const app = express();
 
-// Logging configuration
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev'));
-} else {
-  app.use(morgan('combined'));
-}
+// Trust proxy for Render deployment
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-    },
-  }
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// CORS configuration - FIXED
+// CORS Configuration
 const corsOptions = {
-  origin: function (origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001', 
-      'https://codelens-frontend.vercel.app',
-      'https://codelens.vercel.app',
-      process.env.CORS_ORIGIN
-    ].filter(Boolean);
-    
-    // Allow requests with no origin (mobile apps, etc.)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`CORS: Origin ${origin} not allowed`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app',
+    process.env.CORS_ORIGIN
+  ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Origin', 
-    'X-Requested-With', 
-    'Content-Type', 
-    'Accept', 
-    'Authorization',
-    'Cache-Control',
-    'Pragma'
-  ],
-  exposedHeaders: ['set-cookie']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
 };
 
 app.use(cors(corsOptions));
 
-// Rate limiting
+// Rate Limiting with proper proxy trust
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'development' ? 1000 : 100, // requests per window
+  max: 100, // limit each IP to 100 requests per windowMs
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.',
@@ -86,90 +41,85 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip rate limiting if X-Forwarded-For header validation fails
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    if (req.path === '/health') return true;
+    return false;
+  }
 });
 
-app.use('/api/', limiter);
+app.use(limiter);
+
+// Session middleware - CRITICAL for OAuth state management
+app.use(session({
+  secret: process.env.SESSION_SECRET || process.env.JWT_SECRET || 'fallback-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    httpOnly: true,
+    maxAge: 1000 * 60 * 10 // 10 minutes for OAuth flow
+  },
+  name: 'codelens.sid'
+}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Session configuration (needed for OAuth)
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'codelens-session-secret-change-in-production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
-
-// Passport middleware
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  if (req.headers.authorization) {
-    console.log('Auth header present:', req.headers.authorization.substring(0, 20) + '...');
-  }
-  next();
-});
+// Logging middleware
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+} else {
+  app.use(morgan('combined'));
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     success: true,
-    message: 'CodeLens API is running',
+    message: 'Server is healthy',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    version: '1.0.0'
+    uptime: process.uptime()
   });
 });
 
-// API Routes - FIXED MOUNTING
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CodeLens API Server',
+    version: '1.0.0',
+    endpoints: {
+      auth: '/api/auth/*',
+      users: '/api/users/*',
+      ai: '/api/ai/*',
+      health: '/health'
+    }
+  });
+});
+
+// Import routes
+const authRoutes = require('./routes/auth.routes');
+const userRoutes = require('./routes/user.routes');
+const aiRoutes = require('./routes/ai.routes');
+const reviewRoutes = require('./routes/review.routes');
+
+// API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/reviews', reviewRoutes);
 
-// API Documentation endpoint
-app.get('/api', (req, res) => {
-  res.json({
-    success: true,
-    message: 'CodeLens API v1.0.0',
-    documentation: {
-      auth: {
-        'POST /api/auth/github/callback': 'GitHub OAuth callback',
-        'POST /api/auth/verify-token': 'Verify JWT token',
-        'GET /api/auth/me': 'Get current user (requires auth)',
-        'POST /api/auth/logout': 'Logout user'
-      },
-      users: {
-        'GET /api/users/profile': 'Get user profile (requires auth)',
-        'POST /api/users/preferences': 'Save user preferences (requires auth)',
-        'PUT /api/users/profile': 'Update user profile (requires auth)'
-      },
-      ai: {
-        'POST /api/ai/analyze': 'Analyze code (public endpoint)',
-        'POST /api/ai/review': 'Analyze code (requires auth)',
-        'GET /api/ai/languages': 'Get supported languages'
-      }
-    },
-    timestamp: new Date().toISOString()
-  });
-});
-
-// 404 handler
+// Catch-all for undefined routes
 app.use('*', (req, res) => {
-  console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
     message: 'API endpoint not found',
     error: 'ENDPOINT_NOT_FOUND',
+    path: req.originalUrl,
+    method: req.method,
     availableEndpoints: [
       '/api/auth/*',
       '/api/users/*', 
@@ -182,47 +132,46 @@ app.use('*', (req, res) => {
 // Global error handler
 app.use((error, req, res, next) => {
   console.error('Global error handler:', error);
-  
-  if (error.message === 'Not allowed by CORS') {
-    return res.status(403).json({
-      success: false,
-      message: 'CORS policy violation',
-      error: 'CORS_ERROR'
-    });
-  }
 
-  if (error.type === 'entity.parse.failed') {
+  // Handle specific error types
+  if (error.name === 'ValidationError') {
     return res.status(400).json({
       success: false,
-      message: 'Invalid JSON in request body',
-      error: 'INVALID_JSON'
+      message: 'Validation error',
+      error: 'VALIDATION_ERROR',
+      details: error.message
     });
   }
 
-  if (error.type === 'entity.too.large') {
-    return res.status(413).json({
+  if (error.name === 'JsonWebTokenError') {
+    return res.status(401).json({
       success: false,
-      message: 'Request body too large',
-      error: 'PAYLOAD_TOO_LARGE'
+      message: 'Invalid token',
+      error: 'INVALID_TOKEN'
     });
   }
 
+  if (error.name === 'TokenExpiredError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Token expired',
+      error: 'TOKEN_EXPIRED'
+    });
+  }
+
+  // Handle rate limit errors
+  if (error.code === 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR') {
+    console.warn('Rate limiter proxy warning:', error.message);
+    return next(); // Continue without rate limiting
+  }
+
+  // Default error response
   res.status(error.status || 500).json({
     success: false,
-    message: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
-    error: 'SERVER_ERROR',
+    message: error.message || 'Internal server error',
+    error: error.code || 'SERVER_ERROR',
     ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
-});
-
-// Graceful shutdown handler
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  process.exit(1);
 });
 
 module.exports = app;
