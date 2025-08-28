@@ -2,10 +2,17 @@ import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [tailwindcss(),],
+  plugins: [tailwindcss(), react()],
   build: {
-    outDir: 'dist' // ✅ default — stays inside frontend/
+    outDir: 'dist'
+  },
+  server: {
+    // ✅ Fix for React Router refresh issue in dev
+    historyApiFallback: true
+  },
+  preview: {
+    // ✅ Fix for React Router refresh issue in production preview
+    historyApiFallback: true
   }
 })
