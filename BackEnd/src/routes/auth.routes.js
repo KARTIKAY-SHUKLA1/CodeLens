@@ -278,15 +278,13 @@ router.get('/github/callback', async (req, res) => {
       reviewsLimit: user.credits_limit || 100,
       isNewUser: isNewUser
     };
+    const callbackUrl = `${FRONTEND_URL}/?` +
+  `token=${encodeURIComponent(token)}&` +
+  `user=${encodeURIComponent(JSON.stringify(userDataForFrontend))}&` +
+  `isNewUser=${isNewUser}`;
 
-    const callbackUrl = `${FRONTEND_URL}/auth/callback?` +
-      `token=${encodeURIComponent(token)}&` +
-      `user=${encodeURIComponent(JSON.stringify(userDataForFrontend))}&` +
-      `isNewUser=${isNewUser}`;
-
-    console.log('🔗 Redirecting to frontend callback');
-    res.redirect(callbackUrl);
-
+console.log('🔗 Redirecting to frontend root with token & user');
+res.redirect(callbackUrl);
   } catch (error) {
     console.error('❌ GitHub OAuth callback error:', error);
     res.redirect(`${FRONTEND_URL}/auth/callback?error=callback_failed&message=${encodeURIComponent('Authentication failed due to server error')}`);
