@@ -8,100 +8,168 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Get the authorization code from URL params
+        // Get URL params
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
         const state = urlParams.get('state');
+        const token = urlParams.get('token');
+        const userDataParam = urlParams.get('user');
+        const isNewUser = urlParams.get('isNewUser') === 'true';
         const urlError = urlParams.get('error');
+        const errorMessage = urlParams.get('message');
 
-        if (urlError) {
-          throw new Error(`OAuth Error: ${urlError}`);
-        }
-
-        if (!code) {
-          throw new Error('Authorization code not found in URL parameters');
-        }
-
-        console.log('Processing OAuth callback with code:', code);
-        setStatus('authenticating');
-
-        // FIXED: Send the code to your backend using the correct endpoint
-        const response = await fetch(API_ENDPOINTS.GITHUB_CALLBACK, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            code,
-            ...(state && { state }) // Only include state if it exists
-          })
+        console.log('AuthCallback - URL params:', { 
+          code: !!code, 
+          state: !!state, 
+          token: !!token, 
+          userData: !!userDataParam,
+          isNewUser,
+          urlError,
+          errorMessage
         });
 
-        // FIXED: Better error handling
-        if (!response.ok) {
-          let errorMessage;
+        // ADDED: Handle auth error redirects from backend
+        if (urlError) {
+          console.error('Auth error from backend:', urlError, errorMessage);
+          setError(errorMessage || `Authentication failed: ${urlError}`);
+          setStatus('error');
+          
+          // Auto redirect after showing error
+          setTimeout(() => {
+            if (onNavigate) {
+              onNavigate('home');
+            }
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }, 4000);
+          return;
+        }
+
+        // ADDED: Handle successful auth redirect from backend (with token in URL)
+        if (token && userDataParam) {
+          console.log('Direct auth success from backend redirect');
           try {
-            const errorData = await response.json();
-            errorMessage = errorData.message || errorData.error || `HTTP ${response.status}`;
-          } catch (e) {
-            errorMessage = `Authentication failed with status ${response.status}`;
-          }
-          throw new Error(errorMessage);
-        }
-
-        const data = await response.json();
-        console.log('Auth callback response:', data);
-
-        // FIXED: Validate response data
-        if (!data.token) {
-          throw new Error('No authentication token received from server');
-        }
-
-        if (!data.user) {
-          throw new Error('No user data received from server');
-        }
-
-        // Store the JWT token and user data
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('user_data', JSON.stringify(data.user));
-
-        setStatus('success');
-        
-        // FIXED: Call the auth success callback to refresh user state
-        if (onAuthSuccess) {
-          try {
-            await onAuthSuccess(data.user);
-          } catch (callbackError) {
-            console.warn('Auth success callback failed:', callbackError);
-            // Don't throw - auth was successful, just callback failed
+            const userData = JSON.parse(decodeURIComponent(userDataParam));
+            
+            // Store auth data
+            localStorage.setItem('auth_token', token);
+            localStorage.setItem('user_data', JSON.stringify(userData));
+            
+            setStatus('success');
+            
+            // Call auth success callback
+            if (onAuthSuccess) {
+              try {
+                await onAuthSuccess(userData);
+              } catch (callbackError) {
+                console.warn('Auth success callback failed:', callbackError);
+              }
+            }
+            
+            // Redirect to dashboard
+            setTimeout(() => {
+              if (onNavigate) {
+                onNavigate('dashboard');
+              }
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }, 1500);
+            
+            return;
+          } catch (parseError) {
+            console.error('Failed to parse user data from URL:', parseError);
+            setError('Failed to process authentication data');
+            setStatus('error');
+            return;
           }
         }
+
+        // Original OAuth callback handling (code-based)
+        if (code) {
+          console.log('Processing OAuth callback with code');
+          setStatus('authenticating');
+
+          const response = await fetch(API_ENDPOINTS.GITHUB_CALLBACK, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              code,
+              ...(state && { state })
+            })
+          });
+
+          if (!response.ok) {
+            let errorMessage;
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.message || errorData.error || `HTTP ${response.status}`;
+            } catch (e) {
+              errorMessage = `Authentication failed with status ${response.status}`;
+            }
+            throw new Error(errorMessage);
+          }
+
+          const data = await response.json();
+          console.log('Auth callback response:', data);
+
+          if (!data.token) {
+            throw new Error('No authentication token received from server');
+          }
+
+          if (!data.user) {
+            throw new Error('No user data received from server');
+          }
+
+          // Store the JWT token and user data
+          localStorage.setItem('auth_token', data.token);
+          localStorage.setItem('user_data', JSON.stringify(data.user));
+
+          setStatus('success');
+          
+          if (onAuthSuccess) {
+            try {
+              await onAuthSuccess(data.user);
+            } catch (callbackError) {
+              console.warn('Auth success callback failed:', callbackError);
+            }
+          }
+          
+          setTimeout(() => {
+            if (onNavigate) {
+              onNavigate('dashboard');
+            }
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }, 1500);
+
+          return;
+        }
+
+        // No code, token, or error - invalid callback
+        console.error('Invalid auth callback - no code or token found');
+        setError('Invalid authentication callback. Please try signing in again.');
+        setStatus('error');
         
-        // Redirect to dashboard after a brief delay
         setTimeout(() => {
           if (onNavigate) {
-            onNavigate('dashboard');
+            onNavigate('home');
           }
-          // Clean up URL params after successful auth
           window.history.replaceState({}, document.title, window.location.pathname);
-        }, 1500);
+        }, 4000);
 
       } catch (error) {
         console.error('Auth callback error:', error);
         
-        // FIXED: Clear any partial auth data on error
+        // Clear any partial auth data
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user_data');
         
         setError(error.message);
         setStatus('error');
         
-        // Redirect to home page after error with longer delay
         setTimeout(() => {
           if (onNavigate) {
             onNavigate('home');
           }
-          // Clean up URL params after error
           window.history.replaceState({}, document.title, window.location.pathname);
         }, 4000);
       }
@@ -177,13 +245,13 @@ const AuthCallback = ({ onNavigate, onAuthSuccess }) => {
               {error || 'Something went wrong during authentication'}
             </p>
             
-            {/* ADDED: More detailed error information */}
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-left">
-              <p className="text-red-700 font-medium mb-1">Troubleshooting:</p>
+              <p className="text-red-700 font-medium mb-1">Common solutions:</p>
               <ul className="text-red-600 text-xs space-y-1">
-                <li>• Check your internet connection</li>
-                <li>• Try signing in again</li>
-                <li>• Clear your browser cache if the issue persists</li>
+                <li>• Clear your browser cookies and try again</li>
+                <li>• Make sure you're connected to the internet</li>
+                <li>• Try signing in again from the home page</li>
+                <li>• Contact support if the problem persists</li>
               </ul>
             </div>
             

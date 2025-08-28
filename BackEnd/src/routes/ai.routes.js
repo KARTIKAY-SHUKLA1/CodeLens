@@ -1,617 +1,593 @@
-// src/routes/ai.routes.js - FIXED VERSION
 const express = require('express');
-const passport = require('passport');
-const aiService = require('../services/ai.service');
+const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
+const { authenticateToken } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
-// Validate environment variables - FIXED TO USE SERVICE_KEY
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-  throw new Error('Missing required Supabase environment variables: SUPABASE_URL and SUPABASE_SERVICE_KEY');
-}
-
-// Initialize Supabase - FIXED TO USE SERVICE_KEY
+// Initialize Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
-
-// Language detection utility
-const detectLanguage = (code) => {
-  const detectors = {
-    python: /^(def|class|import|from|if __name__|#|\s*"""|\s*''')/mi,
-    javascript: /^(function|const|let|var|class|=>|\s*\/\/|\s*\/\*)/mi,
-    java: /^(public|private|protected|class|interface|import|package)/mi,
-    cpp: /^(#include|using namespace|int main|class|struct|template)/mi,
-    typescript: /^(interface|type|enum|declare|import.*from)/mi,
-    go: /^(package|import|func|type|var|const)/mi,
-    php: /^(<\?php|namespace|use|class|function)/mi,
-    ruby: /^(class|def|module|require|include)/mi,
-    csharp: /^(using|namespace|class|interface|public|private)/mi,
-    swift: /^(import|class|struct|enum|func|var|let)/mi,
-    kotlin: /^(package|import|class|interface|fun|val|var)/mi,
-    rust: /^(use|fn|struct|enum|impl|mod|pub)/mi
-  };
-
-  for (const [lang, pattern] of Object.entries(detectors)) {
-    if (pattern.test(code.trim())) {
-      return lang;
-    }
-  }
-  return 'plaintext';
-};
-
-// @route   POST /api/ai/review
-// @desc    Analyze code with AI
-// @access  Private (requires authentication)
-router.post('/review', 
-  passport.authenticate('jwt', { session: false }), 
-  async (req, res) => {
-    try {
-      const { code, language: selectedLanguage, preferences = {} } = req.body;
-      const userId = req.user.id;
-
-      // Validation
-      if (!code || code.trim().length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Code is required and cannot be empty'
-        });
-      }
-
-      if (code.length > 50000) { // 50KB limit
-        return res.status(400).json({
-          success: false,
-          message: 'Code is too large. Maximum size is 50KB.'
-        });
-      }
-
-      // Check user's credit limit
-      const { data: user, error: userError } = await supabase
-        .from('users')
-        .select('credits_used, credits_limit, plan')
-        .eq('id', userId)
-        .single();
-
-      if (userError || !user) {
-        return res.status(404).json({
-          success: false,
-          message: 'User not found'
-        });
-      }
-
-      if (user.credits_used >= user.credits_limit) {
-        return res.status(429).json({
-          success: false,
-          message: 'Credit limit reached. Please upgrade your plan.',
-          credits: {
-            used: user.credits_used,
-            limit: user.credits_limit,
-            plan: user.plan
-          }
-        });
-      }
-
-      // Detect language if not provided
-      const detectedLanguage = detectLanguage(code);
-      const finalLanguage = selectedLanguage || detectedLanguage;
-
-      // Language mismatch warning
-      const languageMismatch = selectedLanguage && 
-                               selectedLanguage !== detectedLanguage && 
-                               detectedLanguage !== 'plaintext';
-
-      console.log(`Analysis requested - Selected: ${selectedLanguage}, Detected: ${detectedLanguage}, Final: ${finalLanguage}`);
-
-      // Call AI service with enhanced parameters
-      const analysis = await aiService(code, finalLanguage, {
-        selectedLanguage,
-        detectedLanguage,
-        languageMismatch,
-        userPreferences: preferences,
-        userId,
-        codeLength: code.length,
-        lineCount: code.split('\n').length
-      });
-
-      // Save review to database
-      const reviewData = {
-        user_id: userId,
-        code_snippet: code.substring(0, 5000), // Store first 5KB for reference
-        language: finalLanguage,
-        selected_language: selectedLanguage,
-        detected_language: detectedLanguage,
-        language_mismatch: languageMismatch,
-        overall_score: analysis.overallScore || 0,
-        complexity_score: analysis.metrics?.complexity || 0,
-        maintainability_score: analysis.metrics?.maintainability || 0,
-        security_score: analysis.metrics?.security || 0,
-        performance_score: analysis.metrics?.performance || 0,
-        issues_count: analysis.issues?.length || 0,
-        suggestions_count: analysis.suggestions?.length || 0,
-        analysis_result: analysis,
-        code_length: code.length,
-        line_count: code.split('\n').length,
-        created_at: new Date().toISOString()
-      };
-
-      const { data: reviewRecord, error: reviewError } = await supabase
-        .from('code_reviews')
-        .insert([reviewData])
-        .select()
-        .single();
-
-      if (reviewError) {
-        console.error('Failed to save review:', reviewError);
-        // Continue anyway - don't fail the request
-      }
-
-      // Update user's credit usage
-      const { error: creditError } = await supabase
-        .from('users')
-        .update({ 
-          credits_used: user.credits_used + 1,
-          last_activity: new Date().toISOString()
-        })
-        .eq('id', userId);
-
-      if (creditError) {
-        console.error('Failed to update credits:', creditError);
-      }
-
-      // Return enhanced response
-      res.json({
-        success: true,
-        analysis: {
-          ...analysis,
-          metadata: {
-            reviewId: reviewRecord?.id,
-            selectedLanguage,
-            detectedLanguage,
-            finalLanguage,
-            languageMismatch,
-            codeStats: {
-              length: code.length,
-              lines: code.split('\n').length,
-              characters: code.replace(/\s/g, '').length
-            },
-            timestamp: new Date().toISOString()
-          }
-        },
-        credits: {
-          used: user.credits_used + 1,
-          limit: user.credits_limit,
-          remaining: user.credits_limit - (user.credits_used + 1),
-          plan: user.plan
-        }
-      });
-
-    } catch (error) {
-      console.error('AI Review Error:', error);
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to analyze code. Please try again.',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
+  process.env.SUPABASE_SERVICE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
     }
   }
 );
 
-// @route   GET /api/ai/languages
-// @desc    Get supported languages
+// GitHub OAuth URLs
+const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
+const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+const FRONTEND_URL = process.env.CORS_ORIGIN || 'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app';
+
+// ADDED: Missing /auth/error route
+// @route   GET /api/auth/error
+// @desc    Handle OAuth authentication errors
 // @access  Public
-router.get('/languages', (req, res) => {
-  const supportedLanguages = {
-    javascript: {
-      id: 'javascript',
-      name: 'JavaScript',
-      displayName: 'JavaScript',
-      extensions: ['.js', '.jsx'],
-      category: 'Web',
-      features: ['ES6+', 'Node.js', 'React'],
-      icon: '🟨',
-      color: 'text-yellow-400',
-      bgColor: 'bg-yellow-500/20',
-      borderColor: 'border-yellow-500/30'
-    },
-    typescript: {
-      id: 'typescript',
-      name: 'TypeScript',
-      displayName: 'TypeScript',
-      extensions: ['.ts', '.tsx'],
-      category: 'Web',
-      features: ['Type Safety', 'Modern JS', 'React'],
-      icon: '🔷',
-      color: 'text-blue-400',
-      bgColor: 'bg-blue-500/20',
-      borderColor: 'border-blue-500/30'
-    },
-    python: {
-      id: 'python',
-      name: 'Python',
-      displayName: 'Python',
-      extensions: ['.py', '.pyx'],
-      category: 'General',
-      features: ['Data Science', 'AI/ML', 'Web'],
-      icon: '🐍',
-      color: 'text-green-400',
-      bgColor: 'bg-green-500/20',
-      borderColor: 'border-green-500/30'
-    },
-    java: {
-      id: 'java',
-      name: 'Java',
-      displayName: 'Java',
-      extensions: ['.java'],
-      category: 'Enterprise',
-      features: ['OOP', 'Enterprise', 'Android'],
-      icon: '☕',
-      color: 'text-orange-400',
-      bgColor: 'bg-orange-500/20',
-      borderColor: 'border-orange-500/30'
-    },
-    cpp: {
-      id: 'cpp',
-      name: 'C++',
-      displayName: 'C++',
-      extensions: ['.cpp', '.cc', '.cxx'],
-      category: 'System',
-      features: ['Performance', 'System', 'Gaming'],
-      icon: '⚡',
-      color: 'text-blue-300',
-      bgColor: 'bg-blue-500/20',
-      borderColor: 'border-blue-500/30'
-    },
-    go: {
-      id: 'go',
-      name: 'Go',
-      displayName: 'Go',
-      extensions: ['.go'],
-      category: 'System',
-      features: ['Concurrency', 'Cloud', 'Microservices'],
-      icon: '🚀',
-      color: 'text-cyan-400',
-      bgColor: 'bg-cyan-500/20',
-      borderColor: 'border-cyan-500/30'
-    },
-    php: {
-      id: 'php',
-      name: 'PHP',
-      displayName: 'PHP',
-      extensions: ['.php'],
-      category: 'Web',
-      features: ['Web Development', 'Laravel', 'WordPress'],
-      icon: '🌐',
-      color: 'text-purple-400',
-      bgColor: 'bg-purple-500/20',
-      borderColor: 'border-purple-500/30'
-    },
-    ruby: {
-      id: 'ruby',
-      name: 'Ruby',
-      displayName: 'Ruby',
-      extensions: ['.rb'],
-      category: 'Web',
-      features: ['Ruby on Rails', 'Web Apps', 'Scripting'],
-      icon: '💎',
-      color: 'text-red-400',
-      bgColor: 'bg-red-500/20',
-      borderColor: 'border-red-500/30'
-    },
-    csharp: {
-      id: 'csharp',
-      name: 'C#',
-      displayName: 'C#',
-      extensions: ['.cs'],
-      category: 'Microsoft',
-      features: ['.NET', 'Desktop Apps', 'Web APIs'],
-      icon: '🔵',
-      color: 'text-purple-300',
-      bgColor: 'bg-purple-500/20',
-      borderColor: 'border-purple-500/30'
-    },
-    swift: {
-      id: 'swift',
-      name: 'Swift',
-      displayName: 'Swift',
-      extensions: ['.swift'],
-      category: 'Mobile',
-      features: ['iOS', 'macOS', 'App Development'],
-      icon: '🦉',
-      color: 'text-orange-300',
-      bgColor: 'bg-orange-500/20',
-      borderColor: 'border-orange-500/30'
-    },
-    kotlin: {
-      id: 'kotlin',
-      name: 'Kotlin',
-      displayName: 'Kotlin',
-      extensions: ['.kt', '.kts'],
-      category: 'Mobile',
-      features: ['Android', 'JVM', 'Multiplatform'],
-      icon: '🎯',
-      color: 'text-pink-400',
-      bgColor: 'bg-pink-500/20',
-      borderColor: 'border-pink-500/30'
-    },
-    rust: {
-      id: 'rust',
-      name: 'Rust',
-      displayName: 'Rust',
-      extensions: ['.rs'],
-      category: 'System',
-      features: ['Memory Safety', 'Performance', 'Web Assembly'],
-      icon: '🦀',
-      color: 'text-yellow-600',
-      bgColor: 'bg-yellow-500/20',
-      borderColor: 'border-yellow-500/30'
-    }
-  };
-
-  const categories = {
-    'Web': ['javascript', 'typescript', 'php', 'ruby'],
-    'Mobile': ['swift', 'kotlin', 'java'],
-    'System': ['cpp', 'go', 'rust'],
-    'General': ['python'],
-    'Enterprise': ['java', 'csharp'],
-    'Microsoft': ['csharp']
-  };
-
-  res.json({
-    success: true,
-    languages: Object.values(supportedLanguages),
-    categories,
-    total: Object.keys(supportedLanguages).length
-  });
-});
-
-// @route   POST /api/ai/detect-language
-// @desc    Detect programming language from code
-// @access  Public
-router.post('/detect-language', (req, res) => {
+router.get('/error', (req, res) => {
   try {
-    const { code } = req.body;
+    console.log('=== Auth Error Handler ===');
+    const error = req.query.error || 'unknown_error';
+    const errorDescription = req.query.error_description || '';
     
-    if (!code || code.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Code is required'
-      });
-    }
-
-    const detectedLanguage = detectLanguage(code);
-    const confidence = detectedLanguage === 'plaintext' ? 0.1 : 0.8;
-
-    res.json({
-      success: true,
-      detectedLanguage,
-      confidence,
-      alternatives: [], // Could implement multiple detection results
-      codeStats: {
-        length: code.length,
-        lines: code.split('\n').length
-      }
-    });
-
-  } catch (error) {
-    console.error('Language detection error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to detect language'
-    });
-  }
-});
-
-// @route   POST /api/ai/analyze (PUBLIC VERSION FOR TESTING)
-// @desc    Analyze code with AI - Public endpoint
-// @access  Public
-router.post('/analyze', async (req, res) => {
-  try {
-    console.log('=== ANALYZE ENDPOINT CALLED ===');
-    console.log('Request body:', { 
-      hasCode: !!req.body.code, 
-      codeLength: req.body.code?.length,
-      language: req.body.language 
-    });
-
-    const { code, language: selectedLanguage, preferences = {} } = req.body;
-
-    // Validation
-    if (!code || code.trim().length === 0) {
-      console.log('❌ Validation failed: Empty code');
-      return res.status(400).json({
-        success: false,
-        message: 'Code is required and cannot be empty'
-      });
-    }
-
-    if (code.length > 50000) { // 50KB limit
-      console.log('❌ Validation failed: Code too large');
-      return res.status(400).json({
-        success: false,
-        message: 'Code is too large. Maximum size is 50KB.'
-      });
-    }
-
-    // Detect language if not provided
-    const detectedLanguage = detectLanguage(code);
-    const finalLanguage = selectedLanguage || detectedLanguage;
-
-    // Language mismatch warning
-    const languageMismatch = selectedLanguage && 
-                             selectedLanguage !== detectedLanguage && 
-                             detectedLanguage !== 'plaintext';
-
-    console.log(`✅ Starting Analysis - Selected: ${selectedLanguage}, Detected: ${detectedLanguage}, Final: ${finalLanguage}`);
-
-    // Call AI service with proper error handling
-    const analysis = await aiService(code, finalLanguage, {
-      selectedLanguage,
-      detectedLanguage,
-      languageMismatch,
-      userPreferences: preferences,
-      codeLength: code.length,
-      lineCount: code.split('\n').length
-    });
-
-    console.log('✅ Analysis completed successfully');
-    console.log('Analysis result keys:', Object.keys(analysis));
-
-    // Build comprehensive response
-    const response = {
-      success: true,
-      analysis: {
-        ...analysis,
-        metadata: {
-          selectedLanguage,
-          detectedLanguage,
-          finalLanguage,
-          languageMismatch,
-          codeStats: {
-            length: code.length,
-            lines: code.split('\n').length,
-            characters: code.replace(/\s/g, '').length
-          },
-          timestamp: new Date().toISOString()
-        }
-      }
+    console.log('OAuth Error:', error, errorDescription);
+    
+    // Map common OAuth errors to user-friendly messages
+    const errorMessages = {
+      'invalid_state': 'Authentication failed due to security validation. Please try signing in again.',
+      'access_denied': 'GitHub authentication was cancelled. Please try again.',
+      'github_auth_failed': 'GitHub authentication failed. Please try again.',
+      'google_auth_failed': 'Google authentication failed. Please try again.',
+      'token_exchange_failed': 'Failed to complete authentication. Please try again.',
+      'user_data_failed': 'Failed to retrieve user information. Please try again.',
+      'database_error': 'A system error occurred. Please try again later.',
+      'callback_failed': 'Authentication callback failed. Please try again.',
+      'no_code': 'Authentication code missing. Please try again.',
+      'no_access_token': 'Failed to obtain access token. Please try again.'
     };
-
-    console.log('✅ Sending response with keys:', Object.keys(response.analysis));
-    res.json(response);
-
-  } catch (error) {
-    console.error('❌ Public AI Analysis Error:', error);
-    console.error('Error stack:', error.stack);
     
-    res.status(500).json({
-      success: false,
-      message: 'Failed to analyze code. Please try again.',
-      error: process.env.NODE_ENV === 'development' ? {
-        message: error.message,
-        type: error.name,
-        stack: error.stack?.split('\n').slice(0, 5).join('\n')
-      } : undefined
-    });
+    const userMessage = errorMessages[error] || 'An authentication error occurred. Please try again.';
+    
+    // Redirect to frontend with error information
+    const errorUrl = `${FRONTEND_URL}/auth/error?` +
+      `error=${encodeURIComponent(error)}&` +
+      `message=${encodeURIComponent(userMessage)}`;
+    
+    console.log('Redirecting to error page:', errorUrl);
+    res.redirect(errorUrl);
+    
+  } catch (err) {
+    console.error('Error in auth error handler:', err);
+    // Fallback redirect
+    res.redirect(`${FRONTEND_URL}?auth_error=handler_failed`);
   }
 });
 
-// DEBUG ROUTES
-// @route   GET /api/ai/test-env
-// @desc    Test environment variables
+// @route   GET /api/auth/github
+// @desc    Initiate GitHub OAuth
 // @access  Public
-router.get('/test-env', (req, res) => {
-  res.json({
-    hasGeminiKey: !!process.env.GOOGLE_GEMINI_KEY,
-    hasSupabaseUrl: !!process.env.SUPABASE_URL,
-    hasSupabaseServiceKey: !!process.env.SUPABASE_SERVICE_KEY,
-    nodeEnv: process.env.NODE_ENV,
-    corsOrigin: process.env.CORS_ORIGIN,
-    port: process.env.PORT
-  });
-});
-
-// @route   GET /api/ai/debug-api
-// @desc    Test Gemini API connection
-// @access  Public
-router.get('/debug-api', async (req, res) => {
+router.get('/github', (req, res) => {
   try {
-    const apiKey = process.env.GOOGLE_GEMINI_KEY;
-    console.log('API Key exists:', !!apiKey);
-    console.log('API Key first 10 chars:', apiKey ? apiKey.substring(0, 10) + '...' : 'MISSING');
+    console.log('=== GitHub OAuth Initiation ===');
     
-    if (!apiKey) {
-      return res.json({
-        success: false,
-        error: 'API key missing',
-        env_vars: Object.keys(process.env).filter(k => k.includes('GEMINI') || k.includes('GOOGLE'))
-      });
+    if (!GITHUB_CLIENT_ID) {
+      console.error('❌ GitHub Client ID not configured');
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=oauth_not_configured`);
     }
 
-    // Test simple API call
-    const testPrompt = "Say 'Hello' in JSON format: {\"message\": \"Hello\"}";
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // FIXED: Generate state parameter and store it properly
+    const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     
-    console.log('Making test API call...');
+    // Store state in session
+    if (!req.session) {
+      console.error('❌ Session not available');
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=session_error`);
+    }
     
-    const response = await fetch(apiUrl, {
+    req.session.oauthState = state;
+    
+    // FIXED: Use your actual backend URL
+    const redirectUri = process.env.NODE_ENV === 'production' 
+      ? 'https://codelens-backend-0xl0.onrender.com/api/auth/github/callback'
+      : 'http://localhost:5000/api/auth/github/callback';
+
+    const githubAuthURL = `https://github.com/login/oauth/authorize?` +
+      `client_id=${GITHUB_CLIENT_ID}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `scope=user:email&` +
+      `state=${state}`;
+
+    console.log('🔗 Redirecting to GitHub OAuth:', githubAuthURL);
+    res.redirect(githubAuthURL);
+
+  } catch (error) {
+    console.error('❌ GitHub OAuth initiation error:', error);
+    res.redirect(`${FRONTEND_URL}/auth/error?error=oauth_init_failed`);
+  }
+});
+
+// @route   GET /api/auth/github/callback
+// @desc    Handle GitHub OAuth callback
+// @access  Public
+router.get('/github/callback', async (req, res) => {
+  try {
+    console.log('=== GitHub OAuth Callback ===');
+    
+    const { code, state, error } = req.query;
+    
+    if (error) {
+      console.error('❌ GitHub OAuth error:', error);
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=${encodeURIComponent(error)}`);
+    }
+
+    if (!code) {
+      console.error('❌ No authorization code received');
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=no_code`);
+    }
+
+    // FIXED: Better state validation with fallback
+    if (req.session && req.session.oauthState && state !== req.session.oauthState) {
+      console.error('❌ Invalid state parameter. Expected:', req.session.oauthState, 'Got:', state);
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=invalid_state`);
+    } else if (!req.session) {
+      console.warn('⚠️ No session available for state validation - proceeding anyway');
+    }
+
+    console.log('✅ Authorization code received, exchanging for access token');
+
+    // Exchange code for access token
+    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json'
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: testPrompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 100
-        }
-      })
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
+        code: code,
+      }),
     });
 
-    console.log('Response status:', response.status);
-    console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.error) {
+      console.error('❌ Token exchange error:', tokenData.error);
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=token_exchange_failed`);
+    }
 
-    const responseText = await response.text();
-    console.log('Response text:', responseText);
+    const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      console.error('❌ No access token received');
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=no_access_token`);
+    }
 
-    if (!response.ok) {
-      return res.json({
+    console.log('✅ Access token received, fetching user data');
+
+    // Fetch user data from GitHub
+    const userResponse = await fetch('https://api.github.com/user', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
+
+    const userData = await userResponse.json();
+    
+    if (!userData.id) {
+      console.error('❌ Failed to get user data from GitHub');
+      return res.redirect(`${FRONTEND_URL}/auth/error?error=user_data_failed`);
+    }
+
+    console.log('✅ GitHub user data received:', userData.login);
+
+    // Fetch user email (might be private)
+    const emailResponse = await fetch('https://api.github.com/user/emails', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
+
+    const emails = await emailResponse.json();
+    const primaryEmail = Array.isArray(emails) ? emails.find(email => email.primary)?.email || userData.email : userData.email;
+
+    // Check if user exists in database
+    const { data: existingUser, error: selectError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('github_id', userData.id.toString())
+      .single();
+
+    let user;
+    const isNewUser = !existingUser;
+
+    if (existingUser) {
+      // Update existing user
+      const { data: updatedUser, error: updateError } = await supabase
+        .from('users')
+        .update({
+          username: userData.login,
+          name: userData.name || userData.login,
+          email: primaryEmail || existingUser.email,
+          avatar_url: userData.avatar_url,
+          github_profile_url: userData.html_url,
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingUser.id)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        console.error('❌ Error updating existing user:', updateError);
+        return res.redirect(`${FRONTEND_URL}/auth/error?error=database_error`);
+      }
+
+      user = updatedUser;
+      console.log('✅ Existing user updated:', user.id);
+    } else {
+      // Create new user
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert({
+          github_id: userData.id.toString(),
+          username: userData.login,
+          name: userData.name || userData.login,
+          email: primaryEmail,
+          avatar_url: userData.avatar_url,
+          github_profile_url: userData.html_url,
+          plan: 'free',
+          credits_used: 0,
+          credits_limit: 100,
+          created_at: new Date().toISOString(),
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select('*')
+        .single();
+
+      if (insertError) {
+        console.error('❌ Error creating new user:', insertError);
+        return res.redirect(`${FRONTEND_URL}/auth/error?error=database_error`);
+      }
+
+      user = newUser;
+      console.log('✅ New user created:', user.id);
+    }
+
+    // Generate JWT token
+    const jwtPayload = {
+      userId: user.id,
+      id: user.id, // For backward compatibility
+      email: user.email,
+      username: user.username,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+    };
+
+    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET);
+
+    console.log('✅ JWT token generated for user:', user.id);
+
+    // FIXED: Clear OAuth state safely
+    if (req.session && req.session.oauthState) {
+      delete req.session.oauthState;
+    }
+
+    // Redirect to frontend with token and user data
+    const callbackUrl = `${FRONTEND_URL}/auth/callback?` +
+      `token=${encodeURIComponent(token)}&` +
+      `user=${encodeURIComponent(JSON.stringify({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar_url,
+        githubUsername: user.username,
+        plan: user.plan || 'free',
+        reviewsUsed: user.credits_used || 0,
+        reviewsLimit: user.credits_limit || 100,
+        isNewUser: isNewUser
+      }))}&` +
+      `isNewUser=${isNewUser}`;
+
+    console.log('🔗 Redirecting to frontend callback');
+    res.redirect(callbackUrl);
+
+  } catch (error) {
+    console.error('❌ GitHub OAuth callback error:', error);
+    res.redirect(`${FRONTEND_URL}/auth/error?error=callback_failed`);
+  }
+});
+
+// Rest of your existing routes remain the same...
+// @route   POST /api/auth/github/callback
+// @desc    Handle GitHub OAuth callback (for API calls)
+// @access  Public
+router.post('/github/callback', async (req, res) => {
+  try {
+    const { code, state } = req.body;
+    
+    if (!code) {
+      return res.status(400).json({
         success: false,
-        error: 'API call failed',
-        status: response.status,
-        statusText: response.statusText,
-        response: responseText,
-        url: apiUrl.replace(apiKey, 'API_KEY_HIDDEN')
+        message: 'Authorization code is required',
+        error: 'MISSING_CODE'
       });
     }
 
-    const data = JSON.parse(responseText);
+    // Exchange code for access token (same logic as GET callback)
+    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
+        code: code,
+      }),
+    });
+
+    const tokenData = await tokenResponse.json();
     
+    if (tokenData.error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to exchange authorization code',
+        error: 'TOKEN_EXCHANGE_FAILED',
+        details: tokenData.error
+      });
+    }
+
+    const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No access token received from GitHub',
+        error: 'NO_ACCESS_TOKEN'
+      });
+    }
+
+    // Fetch user data from GitHub
+    const [userResponse, emailResponse] = await Promise.all([
+      fetch('https://api.github.com/user', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }),
+      fetch('https://api.github.com/user/emails', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      })
+    ]);
+
+    const [userData, emails] = await Promise.all([
+      userResponse.json(),
+      emailResponse.json()
+    ]);
+
+    if (!userData.id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to get user data from GitHub',
+        error: 'USER_DATA_FAILED'
+      });
+    }
+
+    const primaryEmail = Array.isArray(emails) ? emails.find(email => email.primary)?.email || userData.email : userData.email;
+
+    // Check if user exists in database
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('github_id', userData.id.toString())
+      .single();
+
+    let user;
+    const isNewUser = !existingUser;
+
+    if (existingUser) {
+      // Update existing user
+      const { data: updatedUser, error: updateError } = await supabase
+        .from('users')
+        .update({
+          username: userData.login,
+          name: userData.name || userData.login,
+          email: primaryEmail || existingUser.email,
+          avatar_url: userData.avatar_url,
+          github_profile_url: userData.html_url,
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingUser.id)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      user = updatedUser;
+    } else {
+      // Create new user
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert({
+          github_id: userData.id.toString(),
+          username: userData.login,
+          name: userData.name || userData.login,
+          email: primaryEmail,
+          avatar_url: userData.avatar_url,
+          github_profile_url: userData.html_url,
+          plan: 'free',
+          credits_used: 0,
+          credits_limit: 100,
+          created_at: new Date().toISOString(),
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select('*')
+        .single();
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      user = newUser;
+    }
+
+    // Generate JWT token
+    const jwtPayload = {
+      userId: user.id,
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60)
+    };
+
+    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET);
+
     res.json({
       success: true,
-      message: 'Gemini API is working!',
-      response: data,
-      apiStatus: response.status
+      token: token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar_url,
+        githubUsername: user.username,
+        plan: user.plan || 'free',
+        reviewsUsed: user.credits_used || 0,
+        reviewsLimit: user.credits_limit || 100,
+        isNewUser: isNewUser
+      },
+      isNewUser: isNewUser
     });
 
   } catch (error) {
-    console.error('Debug API Error:', error);
-    res.json({
+    console.error('Auth callback error:', error);
+    res.status(500).json({
       success: false,
-      error: error.message,
-      stack: error.stack,
-      type: error.name
+      message: 'Authentication failed',
+      error: 'AUTH_FAILED',
+      details: error.message
     });
   }
 });
 
-// @route   GET /api/ai/test-analyze
-// @desc    Test the analyze functionality with sample code
+// @route   POST /api/auth/verify-token
+// @desc    Verify JWT token
 // @access  Public
-router.get('/test-analyze', async (req, res) => {
+router.post('/verify-token', async (req, res) => {
   try {
-    const testCode = `function hello() {
-  console.log("Hello World");
-}`;
-
-    console.log('Testing analyze functionality...');
+    const { token } = req.body;
     
-    const detectedLanguage = detectLanguage(testCode);
-    const analysis = await aiService(testCode, detectedLanguage, {});
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token is required',
+        error: 'MISSING_TOKEN'
+      });
+    }
+
+    // Verify JWT token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.userId || decoded.id;
+
+    // Get user from database
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error || !user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token',
+        error: 'INVALID_TOKEN'
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Analyze endpoint is working!',
-      analysis: analysis
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar_url,
+        githubUsername: user.username,
+        plan: user.plan || 'free',
+        reviewsUsed: user.credits_used || 0,
+        reviewsLimit: user.credits_limit || 100,
+        isNewUser: false
+      }
     });
 
   } catch (error) {
-    console.error('Test analyze error:', error);
-    res.json({
+    console.error('Token verification error:', error);
+    res.status(401).json({
       success: false,
-      error: error.message
+      message: 'Invalid or expired token',
+      error: 'TOKEN_INVALID'
+    });
+  }
+});
+
+// @route   GET /api/auth/me
+// @desc    Get current user
+// @access  Private
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      user: {
+        id: req.user.id,
+        name: req.user.name,
+        email: req.user.email,
+        avatar: req.user.avatar_url,
+        githubUsername: req.user.username,
+        plan: req.user.plan || 'free',
+        reviewsUsed: req.user.credits_used || 0,
+        reviewsLimit: req.user.credits_limit || 100,
+        isNewUser: false
+      }
+    });
+  } catch (error) {
+    console.error('Get me error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user data',
+      error: 'SERVER_ERROR'
+    });
+  }
+});
+
+// @route   POST /api/auth/logout
+// @desc    Logout user
+// @access  Private
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    // In a real app, you might want to blacklist the token or store it in a revoked tokens list
+    // For now, we'll just return success and let the client remove the token
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Logout failed',
+      error: 'SERVER_ERROR'
     });
   }
 });
