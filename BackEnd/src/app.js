@@ -1,4 +1,4 @@
-// src/app.js - CORRECTED VERSION
+// src/app.js - MAIN EXPRESS APPLICATION SETUP
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -17,9 +17,6 @@ const aiRoutes = require('./routes/ai.routes');
 const reviewRoutes = require('./routes/review.routes');
 
 const app = express();
-
-// FIX: Set trust proxy FIRST before any middleware
-app.set('trust proxy', 1);
 
 // Logging configuration
 if (process.env.NODE_ENV === 'development') {
@@ -41,16 +38,14 @@ app.use(helmet({
   }
 }));
 
-// CORS configuration - UPDATED
+// CORS configuration - FIXED
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:3001', 
-      'http://localhost:5173', // Vite dev server
       'https://codelens-frontend.vercel.app',
       'https://codelens.vercel.app',
-      'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app', // Your actual frontend URL
       process.env.CORS_ORIGIN
     ].filter(Boolean);
     
@@ -61,7 +56,6 @@ const corsOptions = {
       callback(null, true);
     } else {
       console.warn(`CORS: Origin ${origin} not allowed`);
-      console.warn(`Allowed origins:`, allowedOrigins);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -81,10 +75,10 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// FIXED: Rate limiting with proper trust proxy configuration
+// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'development' ? 1000 : 100,
+  max: process.env.NODE_ENV === 'development' ? 1000 : 100, // requests per window
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.',
@@ -92,10 +86,6 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // FIX: Don't validate X-Forwarded-For header since we trust proxy
-  validate: {
-    xForwardedForHeader: false,
-  }
 });
 
 app.use('/api/', limiter);
@@ -104,20 +94,16 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// FIXED: Session configuration with proper settings for production
+// Session configuration (needed for OAuth)
 app.use(session({
   secret: process.env.SESSION_SECRET || 'codelens-session-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
-  name: 'codelens.sid',
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
-  },
-  // Use MemoryStore for sessions (consider Redis for production scaling)
-  store: new (require('session').MemoryStore)()
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
 // Passport middleware
@@ -133,33 +119,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// FIX: Add root route to prevent 404 errors
-app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'CodeLens Backend API',
-    version: '1.0.0',
-    status: 'running',
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      health: '/health',
-      api: '/api',
-      auth: '/api/auth/*',
-      users: '/api/users/*',
-      ai: '/api/ai/*'
-    }
-  });
-});
-
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     success: true,
-    message: 'CodeLens API is healthy',
+    message: 'CodeLens API is running',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    version: '1.0.0',
-    uptime: process.uptime()
+    version: '1.0.0'
   });
 });
 
@@ -176,9 +143,7 @@ app.get('/api', (req, res) => {
     message: 'CodeLens API v1.0.0',
     documentation: {
       auth: {
-        'GET /api/auth/github': 'Initiate GitHub OAuth',
-        'GET /api/auth/github/callback': 'GitHub OAuth callback',
-        'POST /api/auth/github/callback': 'GitHub OAuth callback (API)',
+        'POST /api/auth/github/callback': 'GitHub OAuth callback',
         'POST /api/auth/verify-token': 'Verify JWT token',
         'GET /api/auth/me': 'Get current user (requires auth)',
         'POST /api/auth/logout': 'Logout user'
@@ -198,55 +163,31 @@ app.get('/api', (req, res) => {
   });
 });
 
-// FIX: Add auth error route that your frontend is trying to access
-app.get('/auth/error', (req, res) => {
-  const { error, message } = req.query;
-  res.json({
-    success: false,
-    error: error || 'AUTH_ERROR',
-    message: message || 'Authentication failed',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// 404 handler - UPDATED
+// 404 handler
 app.use('*', (req, res) => {
   console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
     message: 'API endpoint not found',
     error: 'ENDPOINT_NOT_FOUND',
-    path: req.originalUrl,
-    method: req.method,
     availableEndpoints: [
-      '/',
-      '/health',
-      '/api',
       '/api/auth/*',
       '/api/users/*', 
       '/api/ai/*',
-      '/auth/error'
-    ],
-    timestamp: new Date().toISOString()
+      '/health'
+    ]
   });
 });
 
-// Global error handler - ENHANCED
+// Global error handler
 app.use((error, req, res, next) => {
-  console.error('Global error handler:', {
-    message: error.message,
-    stack: error.stack,
-    url: req.originalUrl,
-    method: req.method,
-    body: req.body
-  });
+  console.error('Global error handler:', error);
   
   if (error.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
-      message: 'CORS policy violation - origin not allowed',
-      error: 'CORS_ERROR',
-      origin: req.headers.origin
+      message: 'CORS policy violation',
+      error: 'CORS_ERROR'
     });
   }
 
@@ -270,11 +211,7 @@ app.use((error, req, res, next) => {
     success: false,
     message: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
     error: 'SERVER_ERROR',
-    timestamp: new Date().toISOString(),
-    ...(process.env.NODE_ENV === 'development' && { 
-      stack: error.stack,
-      details: error 
-    })
+    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
 });
 
