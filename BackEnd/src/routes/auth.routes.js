@@ -74,18 +74,18 @@ router.get('/github/callback', async (req, res) => {
     
     if (error) {
       console.error('❌ GitHub OAuth error:', error);
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=${encodeURIComponent(error)}`);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=${encodeURIComponent(error)}&message=${encodeURIComponent('GitHub OAuth error')}`);
     }
 
     if (!code) {
       console.error('❌ No authorization code received');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=no_code`);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=no_code&message=${encodeURIComponent('No authorization code received from GitHub')}`);
     }
 
     // Verify state parameter
     if (state !== req.session.oauthState) {
       console.error('❌ Invalid state parameter');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=invalid_state`);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=invalid_state&message=${encodeURIComponent('Invalid state parameter - possible security issue')}`);
     }
 
     console.log('✅ Authorization code received, exchanging for access token');
@@ -108,13 +108,13 @@ router.get('/github/callback', async (req, res) => {
     
     if (tokenData.error) {
       console.error('❌ Token exchange error:', tokenData.error);
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=token_exchange_failed`);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=token_exchange_failed&message=${encodeURIComponent('Failed to exchange authorization code for access token')}`);
     }
 
     const accessToken = tokenData.access_token;
     if (!accessToken) {
       console.error('❌ No access token received');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=no_access_token`);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=no_access_token&message=${encodeURIComponent('No access token received from GitHub')}`);
     }
 
     console.log('✅ Access token received, fetching user data');
@@ -131,7 +131,7 @@ router.get('/github/callback', async (req, res) => {
     
     if (!userData.id) {
       console.error('❌ Failed to get user data from GitHub');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=user_data_failed`);
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=user_data_failed&message=${encodeURIComponent('Failed to get user data from GitHub')}`);
     }
 
     console.log('✅ GitHub user data received:', userData.login);
@@ -176,7 +176,7 @@ router.get('/github/callback', async (req, res) => {
 
       if (updateError) {
         console.error('❌ Error updating existing user:', updateError);
-        return res.redirect(`${FRONTEND_URL}/auth/error?error=database_error`);
+        return res.redirect(`${FRONTEND_URL}/auth/callback?error=database_error&message=${encodeURIComponent('Failed to update user in database')}`);
       }
 
       user = updatedUser;
@@ -204,7 +204,7 @@ router.get('/github/callback', async (req, res) => {
 
       if (insertError) {
         console.error('❌ Error creating new user:', insertError);
-        return res.redirect(`${FRONTEND_URL}/auth/error?error=database_error`);
+        return res.redirect(`${FRONTEND_URL}/auth/callback?error=database_error&message=${encodeURIComponent('Failed to create user in database')}`);
       }
 
       user = newUser;
@@ -249,7 +249,7 @@ router.get('/github/callback', async (req, res) => {
 
   } catch (error) {
     console.error('❌ GitHub OAuth callback error:', error);
-    res.redirect(`${FRONTEND_URL}/auth/error?error=callback_failed`);
+    res.redirect(`${FRONTEND_URL}/auth/callback?error=callback_failed&message=${encodeURIComponent('Authentication failed due to server error')}`);
   }
 });
 
