@@ -1,6 +1,8 @@
+// Navigation.jsx - FIXED VERSION
 import React from 'react';
 import { Menu, X, Home, MessageSquare, User, Settings, CreditCard, LogOut, Sun, Moon, Code, Github } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
+import { API_ENDPOINTS } from '../config/api'; // ADD THIS IMPORT
 
 // Enhanced Navigation with Improved Colors
 function Navigation({ currentPage, onNavigate, isMobileMenuOpen, setIsMobileMenuOpen, user, signOut }) {
@@ -12,6 +14,12 @@ function Navigation({ currentPage, onNavigate, isMobileMenuOpen, setIsMobileMenu
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'pricing', label: 'Pricing', icon: CreditCard },
   ];
+
+  // FIXED: GitHub OAuth Sign In function
+  const handleGitHubSignIn = () => {
+    console.log('Redirecting to GitHub OAuth:', API_ENDPOINTS.GITHUB_AUTH);
+    window.location.href = API_ENDPOINTS.GITHUB_AUTH;
+  };
 
   return (
     <>
@@ -92,12 +100,23 @@ function Navigation({ currentPage, onNavigate, isMobileMenuOpen, setIsMobileMenu
               </div>
             ) : (
               <>
-                <button className={`px-4 py-2 text-sm transition-colors ${
-                  isDark 
-                    ? 'hover:text-blue-400 text-slate-300' 
-                    : 'hover:text-blue-500 text-slate-600'
-                }`}>Sign In</button>
-                <button className="px-4 py-2 bg-gradient-to-r from-blue-500 via-violet-500 to-teal-500 rounded-lg text-sm font-medium hover:from-blue-600 hover:via-violet-600 hover:to-teal-600 transition-all transform hover:scale-105 text-white shadow-lg hover:shadow-xl">
+                {/* FIXED: Use GitHub OAuth instead of generic signIn */}
+                <button 
+                  onClick={handleGitHubSignIn}
+                  className={`px-4 py-2 text-sm transition-colors flex items-center gap-2 ${
+                    isDark 
+                      ? 'hover:text-blue-400 text-slate-300' 
+                      : 'hover:text-blue-500 text-slate-600'
+                  }`}
+                >
+                  <Github className="w-4 h-4" />
+                  Sign In
+                </button>
+                <button 
+                  onClick={handleGitHubSignIn}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-500 via-violet-500 to-teal-500 rounded-lg text-sm font-medium hover:from-blue-600 hover:via-violet-600 hover:to-teal-600 transition-all transform hover:scale-105 text-white shadow-lg hover:shadow-xl flex items-center gap-2"
+                >
+                  <Github className="w-4 h-4" />
                   Get Started
                 </button>
               </>
@@ -148,6 +167,24 @@ function Navigation({ currentPage, onNavigate, isMobileMenuOpen, setIsMobileMenu
                 </button>
               );
             })}
+            
+            {/* FIXED: Add GitHub Sign In to mobile menu */}
+            {!user && (
+              <button
+                onClick={() => {
+                  handleGitHubSignIn();
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                  isDark
+                    ? 'hover:bg-slate-800 text-slate-300 hover:text-slate-100'
+                    : 'hover:bg-slate-100 text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <Github className="w-5 h-5" />
+                Sign In with GitHub
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -155,9 +192,15 @@ function Navigation({ currentPage, onNavigate, isMobileMenuOpen, setIsMobileMenu
   );
 }
 
-// Home Navigation Component - IMPROVED COLORS
-function HomeNavigation({ onNavigate, user, signIn, signOut, isLoading }) {
+// Home Navigation Component - FIXED VERSION
+function HomeNavigation({ onNavigate, user, signOut, isLoading }) {
   const { isDark, toggleTheme } = useTheme();
+  
+  // FIXED: GitHub OAuth Sign In function
+  const handleGitHubSignIn = () => {
+    console.log('Redirecting to GitHub OAuth:', API_ENDPOINTS.GITHUB_AUTH);
+    window.location.href = API_ENDPOINTS.GITHUB_AUTH;
+  };
   
   return (
     <nav className={`relative z-50 px-6 py-4 backdrop-blur-sm border-b ${
@@ -251,22 +294,25 @@ function HomeNavigation({ onNavigate, user, signIn, signOut, isLoading }) {
             </div>
           ) : (
             <>
+              {/* FIXED: Use GitHub OAuth instead of generic signIn */}
               <button 
-                onClick={signIn}
+                onClick={handleGitHubSignIn}
                 disabled={isLoading}
-                className={`px-4 py-2 text-sm transition-colors disabled:opacity-50 ${
+                className={`px-4 py-2 text-sm transition-colors disabled:opacity-50 flex items-center gap-2 ${
                   isDark 
                     ? 'hover:text-blue-400 text-slate-300' 
                     : 'hover:text-blue-500 text-slate-600'
                 }`}
               >
+                <Github className="w-4 h-4" />
                 {isLoading ? 'Signing In...' : 'Sign In'}
               </button>
               <button 
-                onClick={signIn}
+                onClick={handleGitHubSignIn}
                 disabled={isLoading}
-                className="px-4 py-2 bg-gradient-to-r from-blue-500 via-violet-500 to-teal-500 rounded-lg text-sm font-medium hover:from-blue-600 hover:via-violet-600 hover:to-teal-600 transition-all transform hover:scale-105 disabled:opacity-50 text-white shadow-lg hover:shadow-xl disabled:transform-none"
+                className="px-4 py-2 bg-gradient-to-r from-blue-500 via-violet-500 to-teal-500 rounded-lg text-sm font-medium hover:from-blue-600 hover:via-violet-600 hover:to-teal-600 transition-all transform hover:scale-105 disabled:opacity-50 text-white shadow-lg hover:shadow-xl disabled:transform-none flex items-center gap-2"
               >
+                <Github className="w-4 h-4" />
                 Get Started
               </button>
             </>
