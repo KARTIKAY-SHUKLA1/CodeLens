@@ -1,4 +1,4 @@
-import API from '../config/api';
+import { API_ENDPOINTS, getAuthToken } from '../config/api';
 import React, { useState } from 'react';
 import { Code, Sparkles, CheckCircle, AlertTriangle, XCircle, Shield, Zap, Wrench, Eye, Target, TrendingUp, Clock, FileText } from 'lucide-react';
 import { languageDetector } from '../utils/languageDetector';
@@ -64,20 +64,23 @@ function Dashboard({ onNavigate, user }) {
       // CALL YOUR REAL BACKEND API with detected language
       const finalLanguage = detectedLanguage !== 'plaintext' ? detectedLanguage : language;
       
-      const response = await fetch(`${API.ANALYZE_CODE}`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    code: code,
-    language: finalLanguage,
-    selectedLanguage: language,
-    preferences: {
-      strictness: 'balanced',
-      focusAreas: ['quality', 'security', 'performance'],
-      verbosity: 'detailed'
-    }
-  })
-});
+   const response = await fetch(API_ENDPOINTS.ANALYZE_CODE, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        },
+        body: JSON.stringify({
+          code: code,
+          language: finalLanguage,
+          selectedLanguage: language,
+          preferences: {
+            strictness: 'balanced',
+            focusAreas: ['quality', 'security', 'performance'],
+            verbosity: 'detailed'
+          }
+        })
+      });
 
       const result = await response.json();
       
