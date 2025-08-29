@@ -1,27 +1,14 @@
-// src/config/api.js - CORRECTED VERSION
+// src/config/api.js - FIXED VERSION
 // API Configuration for Frontend
 
-// Determine the base API URL based on environment
-const getApiBaseUrl = () => {
-  // Check environment variable first
-  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim() !== '') {
-  const envUrl = import.meta.env.VITE_API_URL.trim();
-  console.log('Using API URL from env:', envUrl);
-  return envUrl;
-}
-  // ALWAYS use production URL - this fixes your connection issues
-  const productionURL = 'https://codelens-backend-0xl0.onrender.com';
-  console.log('Using production API URL:', productionURL);
-  return productionURL;
-};
-
-const API_BASE_URL = getApiBaseUrl();
+// Force production URL to fix the localhost issue
+const API_BASE_URL = 'https://codelens-backend-0xl0.onrender.com';
 
 console.log('API Base URL:', API_BASE_URL);
 
 // API endpoints - These match your backend routes exactly
 export const API_ENDPOINTS = {
-  // AI Analysis endpoints
+  // AI Analysis endpoints - FIXED: All using production URL
   ANALYZE_CODE: `${API_BASE_URL}/api/ai/analyze`,
   REVIEW_CODE: `${API_BASE_URL}/api/ai/review`,
   GET_LANGUAGES: `${API_BASE_URL}/api/ai/languages`,
@@ -88,12 +75,12 @@ export const apiCall = async (endpoint, options = {}) => {
   };
 
   try {
-    console.log(`API Call: ${endpoint}`);
-    console.log(`Token: ${token ? 'Present' : 'Missing'}`);
+    console.log(`🔗 API Call: ${endpoint}`);
+    console.log(`🔑 Token: ${token ? 'Present' : 'Missing'}`);
     
     const response = await fetch(endpoint, defaultOptions);
     
-    console.log(`Response [${response.status}]: ${response.statusText || 'No status text'}`);
+    console.log(`📡 Response [${response.status}]:`, response.statusText || '');
     
     // Handle different status codes
     if (response.status === 401) {
@@ -103,7 +90,7 @@ export const apiCall = async (endpoint, options = {}) => {
     }
     
     if (response.status === 404) {
-      console.error(`Endpoint not found: ${endpoint}`);
+      console.error(`💥 Endpoint not found: ${endpoint}`);
       throw new Error(`API endpoint not found: ${response.status}`);
     }
 
@@ -121,10 +108,10 @@ export const apiCall = async (endpoint, options = {}) => {
       let errorData;
       try {
         errorData = await response.json();
-        console.error(`API Error [${response.status}]:`, errorData);
+        console.error(`💥 API Error [${response.status}]:`, errorData);
       } catch (e) {
         const errorText = await response.text();
-        console.error(`API Error [${response.status}]:`, errorText);
+        console.error(`💥 API Error [${response.status}]:`, errorText);
         errorData = { message: errorText || `HTTP ${response.status}` };
       }
       
@@ -132,17 +119,56 @@ export const apiCall = async (endpoint, options = {}) => {
     }
 
     const data = await response.json();
-    console.log('API Call successful');
+    console.log('✅ API Call successful');
     return data;
     
   } catch (error) {
-    console.error('API Call Failed:', error);
+    console.error('❌ API Call Failed:', error);
     
     // Network errors
     if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
       throw new Error('Network error. Please check your internet connection and try again.');
     }
     
+    throw error;
+  }
+};
+
+// Code analysis function - FIXED to use correct endpoint
+export const analyzeCode = async (code, language, options = {}) => {
+  try {
+    console.log('Analyzing code...');
+    return await apiCall(API_ENDPOINTS.ANALYZE_CODE, {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        language,
+        selectedLanguage: options.selectedLanguage,
+        preferences: options.preferences || {
+          strictness: 'balanced',
+          focusAreas: ['quality', 'security', 'performance'],
+          verbosity: 'detailed'
+        }
+      }),
+    });
+  } catch (error) {
+    console.error('Analysis error:', error);
+    throw error;
+  }
+};
+
+// User profile functions
+export const updateUserPreferences = async (preferences) => {
+  try {
+    console.log('Saving user preferences...');
+    const response = await apiCall(API_ENDPOINTS.UPDATE_PREFERENCES, {
+      method: 'POST',
+      body: JSON.stringify(preferences),
+    });
+    console.log('Preferences saved');
+    return response;
+  } catch (error) {
+    console.error('Failed to save preferences:', error);
     throw error;
   }
 };
@@ -196,29 +222,6 @@ export const getCurrentUser = async () => {
   }
 };
 
-// Code analysis function
-export const analyzeCode = async (code, language, options = {}) => {
-  try {
-    console.log('Analyzing code...');
-    return await apiCall(API_ENDPOINTS.ANALYZE_CODE, {
-      method: 'POST',
-      body: JSON.stringify({
-        code,
-        language,
-        selectedLanguage: options.selectedLanguage,
-        preferences: options.preferences || {
-          strictness: 'balanced',
-          focusAreas: ['quality', 'security', 'performance'],
-          verbosity: 'detailed'
-        }
-      }),
-    });
-  } catch (error) {
-    console.error('Analysis error:', error);
-    throw error;
-  }
-};
-
 // User profile functions
 export const getUserProfile = async () => {
   try {
@@ -226,21 +229,6 @@ export const getUserProfile = async () => {
     return response;
   } catch (error) {
     console.error('Failed to fetch user profile:', error);
-    throw error;
-  }
-};
-
-export const updateUserPreferences = async (preferences) => {
-  try {
-    console.log('Saving user preferences...');
-    const response = await apiCall(API_ENDPOINTS.UPDATE_PREFERENCES, {
-      method: 'POST',
-      body: JSON.stringify(preferences),
-    });
-    console.log('Preferences saved');
-    return response;
-  } catch (error) {
-    console.error('Failed to save preferences:', error);
     throw error;
   }
 };

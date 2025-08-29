@@ -91,7 +91,7 @@ router.get('/github', (req, res) => {
     // FIXED: Use your actual backend URL
     const redirectUri = process.env.NODE_ENV === 'production' 
       ? 'https://codelens-backend-0xl0.onrender.com/api/auth/github/callback'
-      : 'http://localhost:5000/api/auth/github/callback';
+      : 'https://codelens-backend-0xl0.onrender.com/api/auth/github/callback';
 
     const githubAuthURL = `https://github.com/login/oauth/authorize?` +
       `client_id=${GITHUB_CLIENT_ID}&` +

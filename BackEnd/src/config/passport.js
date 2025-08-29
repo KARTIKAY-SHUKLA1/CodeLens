@@ -32,7 +32,7 @@ module.exports = function(passport) {
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.NODE_ENV === 'production' 
       ? "https://codelens-backend-0xl0.onrender.com/api/auth/github/callback"
-      : "http://localhost:5000/api/auth/github/callback"
+      : "https://codelens-backend-0xl0.onrender.com/api/auth/github/callback"
   },
   async (accessToken, refreshToken, profile, done) => {
     try {

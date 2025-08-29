@@ -18,8 +18,6 @@ app.use(helmet({
 // CORS Configuration
 const corsOptions = {
   origin: [
-    'http://localhost:3000',
-    'http://localhost:5173',
     'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app',
     process.env.CORS_ORIGIN
   ].filter(Boolean),
