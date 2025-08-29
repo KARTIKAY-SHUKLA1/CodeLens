@@ -32,92 +32,94 @@ function Dashboard({ onNavigate, user }) {
     { id: 'csharp', name: 'C#', color: 'text-green-500', icon: '#️⃣' }
   ];
 
-  // Enhanced analyze function with language detection
   const handleAnalyze = async () => {
-    if (!code.trim()) return;
-    if (user && user.reviewsUsed >= user.reviewsLimit) {
-      alert('You\'ve reached your review limit! Upgrade to Pro for unlimited reviews.');
-      return;
-    }
-    
-    setIsAnalyzing(true);
-    setError(null);
-    setWarnings([]);
-    setAnalysis(null);
-    
-    try {
-      // DETECT LANGUAGE AUTOMATICALLY
-      const detectedLanguage = languageDetector.detectLanguage(code);
-      setAutoDetectedLang(detectedLanguage);
-      
-      // Check for language mismatch
-      let warningsArray = [];
-      if (detectedLanguage !== language && detectedLanguage !== 'plaintext') {
-        warningsArray.push({
-          type: 'language_mismatch',
-          message: `Code appears to be ${languages.find(l => l.id === detectedLanguage)?.name || detectedLanguage} but ${languages.find(l => l.id === language)?.name} is selected. Analysis will use detected language for better accuracy.`,
-          detectedLanguage: detectedLanguage,
-          selectedLanguage: language
-        });
-      }
+  if (!code.trim()) return;
 
-      // CALL YOUR REAL BACKEND API with detected language
-      const finalLanguage = detectedLanguage !== 'plaintext' ? detectedLanguage : language;
-      
-   const response = await fetch(API_ENDPOINTS.ANALYZE_CODE, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(token && { 'Authorization': `Bearer ${token}` })
-        },
-        body: JSON.stringify({
-          code: code,
-          language: finalLanguage,
-          selectedLanguage: language,
-          preferences: {
-            strictness: 'balanced',
-            focusAreas: ['quality', 'security', 'performance'],
-            verbosity: 'detailed'
-          }
-        })
-      });
+  if (user && user.reviewsUsed >= user.reviewsLimit) {
+    alert("You've reached your review limit! Upgrade to Pro for unlimited reviews.");
+    return;
+  }
 
-      const result = await response.json();
-      
-      if (!result.success) {
-        throw new Error(result.error?.message || 'Analysis failed');
-      }
+  setIsAnalyzing(true);
+  setError(null);
+  setWarnings([]);
+  setAnalysis(null);
 
-      // Merge warnings
-      if (result.warnings) {
-        warningsArray = [...warningsArray, ...result.warnings];
-      }
-      
-      setWarnings(warningsArray);
+  try {
+    // DETECT LANGUAGE AUTOMATICALLY
+    const detectedLanguage = languageDetector.detectLanguage(code);
+    setAutoDetectedLang(detectedLanguage);
 
-      // Set the comprehensive analysis result
-      setAnalysis({
-        ...result.analysis,
+    // Check for language mismatch
+    let warningsArray = [];
+    if (detectedLanguage !== language && detectedLanguage !== "plaintext") {
+      warningsArray.push({
+        type: "language_mismatch",
+        message: `Code appears to be ${
+          languages.find((l) => l.id === detectedLanguage)?.name || detectedLanguage
+        } but ${languages.find((l) => l.id === language)?.name} is selected. Analysis will use detected language for better accuracy.`,
         detectedLanguage: detectedLanguage,
         selectedLanguage: language,
-        finalLanguage: finalLanguage
       });
-      
-      if (user) {
-        user.reviewsUsed = user.reviewsUsed + 1;
-      }
-      
-    } catch (err) {
-      console.error('Analysis error:', err);
-      setError({
-        type: 'analysis_error',
-        title: 'Analysis Failed',
-        message: err.message || 'Unable to analyze code. Please try again.'
-      });
-    } finally {
-      setIsAnalyzing(false);
     }
-  };
+
+    // Use detected language if not plaintext
+    const finalLanguage = detectedLanguage !== "plaintext" ? detectedLanguage : language;
+
+    // Get token safely
+    const token = getAuthToken();
+
+    const response = await fetch(API_ENDPOINTS.ANALYZE_CODE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({
+        code,
+        language: finalLanguage,
+        selectedLanguage: language,
+        preferences: {
+          strictness: "balanced",
+          focusAreas: ["quality", "security", "performance"],
+          verbosity: "detailed",
+        },
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.error?.message || "Analysis failed");
+    }
+
+    // Merge warnings
+    if (result.warnings) warningsArray = [...warningsArray, ...result.warnings];
+    setWarnings(warningsArray);
+
+    // Set the analysis safely
+    setAnalysis({
+      ...result.analysis,
+      detectedLanguage,
+      selectedLanguage: language,
+      finalLanguage,
+    });
+
+    // Update reviewsUsed safely without mutating user object
+    if (user) {
+      setUserData({ ...user, reviewsUsed: user.reviewsUsed + 1 }, token);
+    }
+  } catch (err) {
+    console.error("Analysis error:", err);
+    setError({
+      type: "analysis_error",
+      title: "Analysis Failed",
+      message: err.message || "Unable to analyze code. Please try again.",
+    });
+  } finally {
+    setIsAnalyzing(false);
+  }
+};
 
   const getScoreColor = (score) => {
     if (score >= 9) return 'text-emerald-400';

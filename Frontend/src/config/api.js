@@ -4,11 +4,11 @@
 // Determine the base API URL based on environment
 const getApiBaseUrl = () => {
   // Check environment variable first
-  if (import.meta.env.VITE_API_URL) {
-    console.log('Using API URL from env:', import.meta.env.VITE_API_URL);
-    return import.meta.env.VITE_API_URL;
-  }
-  
+  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim() !== '') {
+  const envUrl = import.meta.env.VITE_API_URL.trim();
+  console.log('Using API URL from env:', envUrl);
+  return envUrl;
+}
   // ALWAYS use production URL - this fixes your connection issues
   const productionURL = 'https://codelens-backend-0xl0.onrender.com';
   console.log('Using production API URL:', productionURL);
