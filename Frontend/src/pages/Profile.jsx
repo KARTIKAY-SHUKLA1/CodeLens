@@ -34,9 +34,10 @@ function Profile({ user }) {
 
     // use your new getReviewHistory function
     const response = await apiCall(
-  API_ENDPOINTS.USER_HISTORY.replace(':id', user.id),
+  `/api/test/user-data/${user.id}`,
   'GET'
 );
+
     console.log("📡 Reviews response:", response);
 
     if (response && Array.isArray(response)) {
@@ -71,33 +72,51 @@ function Profile({ user }) {
 };
 const fetchUserStatistics = async () => {
   try {
-    console.log("Fetching user statistics...");
+    console.log("📡 Fetching user stats + history from backend...");
 
-    const response = await getReviewStats(); // directly use api.js helper
-    console.log("Stats response:", response);
+    // ✅ Real API call
+    const response = await apiCall(`/api/test/user-data/${user.id}`, "GET");
 
-    if (response) {
-      // Calculate top languages
-      const topLanguages = Object.entries(response.language_distribution || {})
+    if (response.success) {
+      const reviewData = response.reviews || [];
+
+      // Calculate stats
+      const totalReviews = reviewData.length;
+      const averageScore =
+        reviewData.reduce((sum, r) => sum + (r.overall_score || 0), 0) /
+        (totalReviews || 1);
+
+      // Top languages (based on reviews)
+      const langCount = {};
+      reviewData.forEach((r) => {
+        if (r.language) {
+          langCount[r.language] = (langCount[r.language] || 0) + 1;
+        }
+      });
+      const topLanguages = Object.entries(langCount)
         .sort(([, a], [, b]) => b - a)
         .slice(0, 5)
         .map(([language, count]) => ({ language, count }));
 
       setStatistics({
-        totalReviews: response.total_reviews || 0,
-        averageScore: parseFloat(response.average_score) || 0,
+        totalReviews,
+        averageScore,
         topLanguages,
-        creditsRemaining: (user.reviewsLimit || 100) - (user.reviewsUsed || 0),
-        languagesReviewed: response.languages_used || 0,
-        languageDistribution: response.language_distribution || {}
+        creditsRemaining:
+          (user.reviewsLimit || 100) - (user.reviewsUsed || totalReviews),
+        languagesReviewed: Object.keys(langCount).length,
+        languageDistribution: langCount,
       });
 
-      console.log("✅ Statistics updated:", response);
+      console.log("✅ Statistics updated:", { totalReviews, averageScore, topLanguages });
+    } else {
+      console.error("❌ Failed to fetch stats:", response.message);
     }
   } catch (err) {
     console.error("❌ Error fetching statistics:", err);
   }
 };
+
 
   const getScoreColor = (score) => {
     if (score >= 8) return 'text-green-400';

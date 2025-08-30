@@ -2,7 +2,8 @@ const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
+
 );
 const express = require('express');
 const cors = require('cors');
@@ -13,8 +14,6 @@ const session = require('express-session');
 
 const app = express();
 // Add this to your main server.js or app.js file
-app.use('/api/reviews', require('./routes/review.routes'));
-app.use('/api/users', require('./routes/user.routes'));
 
 // Test database connection endpoint
 app.get('/api/test/db', async (req, res) => {
@@ -134,9 +133,10 @@ app.use(helmet({
 // CORS Configuration
 const corsOptions = {
   origin: [
-    'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app',
-    process.env.CORS_ORIGIN
-  ].filter(Boolean),
+  'http://localhost:3000',
+  'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app',
+  process.env.CORS_ORIGIN
+].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
