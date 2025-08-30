@@ -3,8 +3,11 @@ import React, { useState } from 'react';
 import { Code, Sparkles, CheckCircle, AlertTriangle, XCircle, Shield, Zap, Wrench, Eye, Target, TrendingUp, Clock, FileText } from 'lucide-react';
 import { languageDetector } from '../utils/languageDetector';
 import { useTheme } from '../components/ThemeProvider';
+import useAuth from '../hooks/useAuth';
 
 function Dashboard({ onNavigate, user }) {
+  const { setUserData } = useAuth(); // Add this line - destructure setUserData from useAuth
+  
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('javascript');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -396,9 +399,6 @@ function Dashboard({ onNavigate, user }) {
                   )}
                 </div>
 
-                {/* Rest of your analysis components with theme support... */}
-                {/* (I'll keep the rest the same but add theme classes where needed) */}
-                
                 {/* Code Statistics */}
                 {analysis.statistics && (
                   <div className={`rounded-xl p-6 border shadow-lg ${themeClasses.cardBg}`}>
