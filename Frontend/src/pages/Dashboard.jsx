@@ -90,19 +90,35 @@ function Dashboard({ onNavigate, user }) {
       }),
     });
 
+    // ADD DEBUG LOGGING HERE
+    console.log("Response status:", response.status);
+    console.log("Response ok:", response.ok);
+    
     const result = await response.json();
+    
+    // ADD MORE DEBUG LOGGING
+    console.log("Full API Response:", result);
+    console.log("Result success field:", result.success);
+    console.log("Result analysis field:", result.analysis);
 
-    if (!result.success) {
-      throw new Error(result.error?.message || "Analysis failed");
+    // MODIFIED SUCCESS CHECK - try both conditions
+    if (!response.ok || (!result.success && !result.analysis)) {
+      console.error("API Error - Result:", result);
+      throw new Error(result.error?.message || result.message || "Analysis failed");
     }
 
     // Merge warnings
     if (result.warnings) warningsArray = [...warningsArray, ...result.warnings];
     setWarnings(warningsArray);
 
+    // CORRECTED: Handle the actual backend response structure
+    const analysisData = result.data?.analysis || result.analysis || result.data || result;
+    
+    console.log("Setting analysis data:", analysisData);
+
     // Set the analysis safely
     setAnalysis({
-      ...result.analysis,
+      ...analysisData,
       detectedLanguage,
       selectedLanguage: language,
       finalLanguage,
