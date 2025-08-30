@@ -5,7 +5,8 @@ import useAuth from '../hooks/useAuth';
 function AuthCallback() {
   const [status, setStatus] = useState('processing');
   const [error, setError] = useState(null);
-  const { handleAuthCallback, setUserData } = useAuth();
+  const authHook = useAuth();
+const { handleAuthCallback, setUserData } = authHook;
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -50,8 +51,11 @@ function AuthCallback() {
             localStorage.setItem('auth_token', token);
             localStorage.setItem('user_data', JSON.stringify(userData));
             
-            // Update auth context
-            setUserData(userData, token);
+            if (setUserData && typeof setUserData === 'function') {
+  setUserData(userData, token);
+} else {
+  console.warn('setUserData not available, data stored in localStorage only');
+}
             
             setStatus('success');
             console.log('Authentication successful');

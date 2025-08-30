@@ -6,7 +6,6 @@ import { useTheme } from '../components/ThemeProvider';
 import useAuth from '../hooks/useAuth';
 
 function Dashboard({ onNavigate, user }) {
-  
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('javascript');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
