@@ -6,8 +6,8 @@ const router = express.Router();
 
 // Initialize Supabase
 const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://db.oqrnlnvrrnugkxhjixyr.supabase.co',
-  process.env.SUPABASE_SERVICE_KEY || process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || ''
+  process.env.SUPABASE_URL || 'https://oqrnlnvrrnugkxhjixyr.supabase.co',
+  process.env.SUPABASE_SERVICE_KEY
 );
 
 // Middleware to authenticate all review routes
@@ -78,6 +78,136 @@ router.post('/increment', async (req, res) => {
     });
   }
 });
+
+// @route   GET /api/reviews/history
+// @desc    Get user's review history for Profile page (ADDED THIS NEW ENDPOINT)
+// @access  Private
+router.get('/history', async (req, res) => {
+  try {
+    console.log('=== GET Review History Endpoint ===');
+    console.log('Fetching history for user:', req.user.id);
+
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Max 100
+    const offset = (page - 1) * limit;
+
+    // Get reviews
+    const { data: reviews, error } = await supabase
+      .from('code_reviews')
+      .select(`
+        id, title, code_content, language, file_name, overall_score,
+        issues_count, suggestions_count, status, tags, is_public, 
+        is_favorite, created_at, updated_at, analysis_result
+      `)
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      console.error('❌ Error fetching review history:', error);
+      throw error;
+    }
+
+    console.log(`✅ Found ${reviews?.length || 0} reviews for user ${req.user.id}`);
+
+    // Get total count for pagination
+    const { count, error: countError } = await supabase
+      .from('code_reviews')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', req.user.id);
+
+    if (countError) {
+      console.error('❌ Error getting review count:', countError);
+      throw countError;
+    }
+
+    res.json({
+      success: true,
+      reviews: reviews || [],
+      pagination: {
+        current: page,
+        limit,
+        totalPages: Math.ceil((count || 0) / limit),
+        totalItems: count || 0,
+        hasNext: offset + limit < (count || 0),
+        hasPrev: page > 1
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get review history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch review history',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Get user review statistics
+router.get('/stats', async (req, res) => {
+  try {
+    console.log('📊 Fetching review stats for user:', req.user.id);
+
+    const { data: reviews, error } = await supabase
+      .from('code_reviews')
+      .select('language, overall_score, created_at, status, issues_count, suggestions_count')
+      .eq('user_id', req.user.id);
+
+    if (error) throw error;
+
+    const stats = {
+      totalReviews: reviews?.length || 0,
+      completedReviews: reviews?.filter(r => r.status === 'completed').length || 0,
+      pendingReviews: reviews?.filter(r => r.status === 'pending').length || 0,
+      failedReviews: reviews?.filter(r => r.status === 'error').length || 0,
+      averageScore: 0,
+      totalIssues: 0,
+      totalSuggestions: 0,
+      languageDistribution: {},
+      monthlyTrend: {},
+      scoreDistribution: { excellent: 0, good: 0, average: 0, poor: 0 }
+    };
+
+    if (reviews?.length) {
+      const completed = reviews.filter(r => r.status === 'completed' && r.overall_score != null);
+      if (completed.length) {
+        stats.averageScore = parseFloat(
+          (completed.reduce((sum, r) => sum + r.overall_score, 0) / completed.length).toFixed(1)
+        );
+      }
+
+      stats.totalIssues = reviews.reduce((sum, r) => sum + (r.issues_count || 0), 0);
+      stats.totalSuggestions = reviews.reduce((sum, r) => sum + (r.suggestions_count || 0), 0);
+
+      reviews.forEach(r => {
+        stats.languageDistribution[r.language] = (stats.languageDistribution[r.language] || 0) + 1;
+      });
+
+      completed.forEach(r => {
+        if (r.overall_score >= 8) stats.scoreDistribution.excellent++;
+        else if (r.overall_score >= 6) stats.scoreDistribution.good++;
+        else if (r.overall_score >= 4) stats.scoreDistribution.average++;
+        else stats.scoreDistribution.poor++;
+      });
+
+      const twelveMonthsAgo = new Date();
+      twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+      reviews
+        .filter(r => new Date(r.created_at) >= twelveMonthsAgo)
+        .forEach(r => {
+          const month = new Date(r.created_at).toISOString().slice(0, 7);
+          stats.monthlyTrend[month] = (stats.monthlyTrend[month] || 0) + 1;
+        });
+    }
+
+    res.json({ success: true, stats });
+  } catch (err) {
+    console.error('❌ Error in /stats:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch stats' });
+  }
+});
+
 
 // @route   GET /api/reviews
 // @desc    Get user's code reviews with pagination
@@ -287,65 +417,6 @@ router.get('/public', async (req, res) => {
     });
   }
 });
-
-// @route   GET /api/reviews/stats
-// @desc    Get user's review statistics
-// @access  Private
-router.get('/stats', async (req, res) => {
-  try {
-    const { data: reviews, error } = await supabase
-      .from('code_reviews')
-      .select('language, overall_score, created_at, status')
-      .eq('user_id', req.user.id);
-
-    if (error) {
-      throw error;
-    }
-
-    const stats = {
-      totalReviews: reviews.length,
-      completedReviews: reviews.filter(r => r.status === 'completed').length,
-      averageScore: 0,
-      languageDistribution: {},
-      monthlyTrend: {}
-    };
-
-    if (reviews.length > 0) {
-      const completedReviews = reviews.filter(r => r.status === 'completed' && r.overall_score);
-      stats.averageScore = completedReviews.length > 0 
-        ? (completedReviews.reduce((sum, r) => sum + r.overall_score, 0) / completedReviews.length).toFixed(1)
-        : 0;
-
-      // Language distribution
-      reviews.forEach(review => {
-        stats.languageDistribution[review.language] = (stats.languageDistribution[review.language] || 0) + 1;
-      });
-
-      // Monthly trend (last 6 months)
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-      const recentReviews = reviews.filter(r => new Date(r.created_at) >= sixMonthsAgo);
-      recentReviews.forEach(review => {
-        const month = new Date(review.created_at).toISOString().slice(0, 7); // YYYY-MM format
-        stats.monthlyTrend[month] = (stats.monthlyTrend[month] || 0) + 1;
-      });
-    }
-
-    res.json({
-      success: true,
-      stats
-    });
-
-  } catch (error) {
-    console.error('Get stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch statistics'
-    });
-  }
-});
-
 // @route   GET /api/reviews/:id
 // @desc    Get a specific code review
 // @access  Private

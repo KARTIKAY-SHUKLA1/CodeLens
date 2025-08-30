@@ -57,9 +57,8 @@ router.get('/profile', async (req, res) => {
   try {
     console.log('=== GET Profile Endpoint ===');
     console.log('Getting profile for user ID:', req.user?.id);
-    
+
     if (!req.user || !req.user.id) {
-      console.log('❌ No user ID found in request');
       return res.status(401).json({
         success: false,
         message: 'User not authenticated',
@@ -67,9 +66,7 @@ router.get('/profile', async (req, res) => {
       });
     }
 
-    console.log('Querying Supabase for user:', req.user.id);
-
-    // FIXED: Remove preferences from select to avoid column error
+    // Get user info
     const { data: user, error } = await supabase
       .from('users')
       .select(`
@@ -80,73 +77,60 @@ router.get('/profile', async (req, res) => {
       .eq('id', req.user.id)
       .single();
 
-    if (error) {
-      console.error('❌ Supabase error getting user:', error);
+    if (error || !user) {
       return res.status(404).json({
         success: false,
         message: 'User profile not found',
         error: 'USER_NOT_FOUND',
-        details: error.message
+        details: error?.message
       });
     }
 
-    if (!user) {
-      console.log('❌ No user data returned from Supabase');
-      return res.status(404).json({
-        success: false,
-        message: 'User profile not found',
-        error: 'USER_NOT_FOUND'
-      });
-    }
+    // Get user preferences
+    const { data: userPrefs } = await supabase
+      .from('user_preferences')
+      .select('preferences')
+      .eq('user_id', req.user.id)
+      .single();
 
-    console.log('✅ User found:', user.id);
-
-    // Get user statistics
-    const { data: reviewStats, error: statsError } = await supabase
+    // Get review stats
+    const { data: reviewStats } = await supabase
       .from('code_reviews')
       .select('id, overall_score, language, created_at, status')
       .eq('user_id', req.user.id);
 
-    if (statsError) {
-      console.error('⚠️ Error getting user stats:', statsError);
-    }
-
-    // Calculate statistics
     const totalReviews = reviewStats?.length || 0;
     const completedReviews = reviewStats?.filter(r => r.status === 'completed').length || 0;
-    const averageScore = reviewStats?.length > 0 
-      ? (reviewStats.reduce((sum, r) => sum + (r.overall_score || 0), 0) / reviewStats.length).toFixed(1)
+    const completedWithScores = reviewStats?.filter(r => r.status === 'completed' && r.overall_score != null) || [];
+    const averageScore = completedWithScores.length > 0
+      ? (completedWithScores.reduce((sum, r) => sum + r.overall_score, 0) / completedWithScores.length).toFixed(1)
       : 0;
-    
+
     const languageStats = reviewStats?.reduce((acc, review) => {
       acc[review.language] = (acc[review.language] || 0) + 1;
       return acc;
     }, {}) || {};
 
     const topLanguages = Object.entries(languageStats)
-      .sort(([,a], [,b]) => b - a)
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 5)
       .map(([lang, count]) => ({ language: lang, count }));
 
-    // Format response to match frontend expectations (removed preferences)
-    const formattedUser = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar_url,
-      githubUsername: user.username,
-      plan: user.plan || 'free',
-      reviewsUsed: user.credits_used || 0,
-      reviewsLimit: user.credits_limit || 100,
-      isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
-      preferences: {} // Return empty object for now
-    };
-
-    console.log('✅ Returning user profile for:', formattedUser.id);
-    
+    // Final response
     res.json({
       success: true,
-      user: formattedUser,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar_url,
+        githubUsername: user.username,
+        plan: user.plan || 'free',
+        reviewsUsed: user.credits_used || 0,
+        reviewsLimit: user.credits_limit || 100,
+        isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
+        preferences: userPrefs?.preferences || {}
+      },
       statistics: {
         totalReviews,
         completedReviews,
@@ -166,6 +150,7 @@ router.get('/profile', async (req, res) => {
     });
   }
 });
+
 
 // @route   POST /api/users/preferences
 // @desc    Save user preferences (temporarily store in a separate table or JSON column)
@@ -367,44 +352,48 @@ router.put('/profile', async (req, res) => {
 
 // Rest of the routes remain the same...
 // @route   GET /api/users/dashboard
+// =========================
+// GET /api/users/dashboard
+// =========================
 router.get('/dashboard', async (req, res) => {
   try {
-    console.log('=== GET Dashboard Endpoint ===');
-    
-    if (!req.user || !req.user.id) {
+    if (!req.user?.id) {
       return res.status(401).json({
         success: false,
-        message: 'User not authenticated',
-        error: 'NO_USER_ID'
+        message: 'Unauthorized'
       });
     }
 
-    const userId = req.user.id;
-
     // Get recent reviews
-    const { data: recentReviews, error: reviewsError } = await supabase
+    const { data: recentReviews } = await supabase
       .from('code_reviews')
-      .select('id, title, language, overall_score, created_at, status, issues_count')
-      .eq('user_id', userId)
+      .select('id, status, created_at, overall_score')
+      .eq('user_id', req.user.id)
       .order('created_at', { ascending: false })
-      .limit(10);
+      .limit(5);
 
-    if (reviewsError) {
-      console.error('❌ Error getting recent reviews:', reviewsError);
-      // Don't throw, just return empty array
-    }
+    // Get user info for credits
+    const { data: user } = await supabase
+      .from('users')
+      .select('credits_used, credits_limit')
+      .eq('id', req.user.id)
+      .single();
+
+    // Compute average score from reviews
+    const completedWithScores = recentReviews?.filter(r => r.status === 'completed' && r.overall_score != null) || [];
+    const averageScore = completedWithScores.length > 0
+      ? (completedWithScores.reduce((sum, r) => sum + r.overall_score, 0) / completedWithScores.length).toFixed(1)
+      : 0;
 
     res.json({
       success: true,
-      data: {
+      dashboard: {
         recentReviews: recentReviews || [],
-        chartData: [], // Placeholder for now
-        languageStats: [],
         summary: {
           totalReviews: recentReviews?.length || 0,
-          averageScore: 0,
-          creditsUsed: req.user.credits_used || 0,
-          creditsLimit: req.user.credits_limit || 100
+          averageScore: parseFloat(averageScore),
+          creditsUsed: user?.credits_used || 0,
+          creditsLimit: user?.credits_limit || 100
         }
       }
     });
@@ -413,12 +402,12 @@ router.get('/dashboard', async (req, res) => {
     console.error('❌ Dashboard error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to load dashboard data',
-      error: 'SERVER_ERROR',
-      details: error.message
+      message: 'Failed to get dashboard data',
+      error: error.message
     });
   }
 });
+
 
 // @route   GET /api/users/activity
 router.get('/activity', async (req, res) => {
@@ -452,5 +441,94 @@ router.get('/activity', async (req, res) => {
     });
   }
 });
+// Get logged-in user's review history
+router.get('/history', async (req, res) => {
+  try {
+    console.log('📜 Fetching history for user:', req.user.id);
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100); 
+    const offset = (page - 1) * limit;
+
+    const { data: reviews, error } = await supabase
+      .from('code_reviews')
+      .select(`
+        id, title, file_name, language, status,
+        overall_score, created_at, updated_at
+      `)
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) throw error;
+
+    const { count, error: countError } = await supabase
+      .from('code_reviews')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', req.user.id);
+
+    if (countError) throw countError;
+
+    res.json({
+      success: true,
+      reviews: reviews || [],
+      pagination: {
+        current: page,
+        limit,
+        total: Math.ceil((count || 0) / limit),
+        count: count || 0,
+        hasNext: offset + limit < (count || 0),
+        hasPrev: page > 1
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Get review history error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch review history'
+    });
+  }
+});
+
+// =========================
+// GET /api/users/:id/history
+// =========================
+// Get public user profile history
+router.get('/:id/history', async (req, res) => {
+  try {
+    console.log('📜 Fetching history for user:', req.params.id);
+
+    const { data: reviews, error } = await supabase
+      .from('code_reviews')
+      .select(`
+        id,
+        status,
+        created_at,
+        overall_score,
+        language,
+        title,
+        file_name
+      `) // Removed repositories() to avoid FK issues
+      .eq('user_id', req.params.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      reviews: reviews || []
+    });
+
+  } catch (err) {
+    console.error('❌ Error fetching user history:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch user history'
+    });
+  }
+});
+
 
 module.exports = router;

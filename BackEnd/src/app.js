@@ -1,3 +1,9 @@
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -6,6 +12,116 @@ const morgan = require('morgan');
 const session = require('express-session');
 
 const app = express();
+// Add this to your main server.js or app.js file
+app.use('/api/reviews', require('./routes/review.routes'));
+app.use('/api/users', require('./routes/user.routes'));
+
+// Test database connection endpoint
+app.get('/api/test/db', async (req, res) => {
+  try {
+    console.log('=== Database Connection Test ===');
+    
+    // Test basic connection
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('count(*)')
+      .limit(1);
+    
+    if (usersError) {
+      throw new Error(`Users table error: ${usersError.message}`);
+    }
+
+    const { data: reviews, error: reviewsError } = await supabase
+      .from('code_reviews')
+      .select('count(*)')
+      .limit(1);
+    
+    if (reviewsError) {
+      throw new Error(`Reviews table error: ${reviewsError.message}`);
+    }
+
+    console.log('✅ Database connection successful');
+    
+    res.json({
+      success: true,
+      message: 'Database connection successful',
+      timestamp: new Date().toISOString(),
+      tables: {
+        users: 'accessible',
+        code_reviews: 'accessible'
+      },
+      environment: process.env.NODE_ENV || 'development',
+      supabase_url: process.env.SUPABASE_URL ? 'configured' : 'missing'
+    });
+    
+  } catch (error) {
+    console.error('❌ Database connection failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Database connection failed',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Test specific user data endpoint
+app.get('/api/test/user-data/:userId', async (req, res) => {
+  try {
+    console.log('=== Testing User Data ===');
+    console.log('User ID:', req.params.userId);
+    
+    // Get user profile
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', req.params.userId)
+      .single();
+    
+    if (userError) {
+      throw new Error(`User query error: ${userError.message}`);
+    }
+
+    // Get user's reviews
+    const { data: reviews, error: reviewsError } = await supabase
+      .from('code_reviews')
+      .select('id, title, language, created_at, status, overall_score')
+      .eq('user_id', req.params.userId)
+      .order('created_at', { ascending: false });
+    
+    if (reviewsError) {
+      throw new Error(`Reviews query error: ${reviewsError.message}`);
+    }
+
+    console.log(`✅ Found user with ${reviews?.length || 0} reviews`);
+    
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        reviewCount: reviews?.length || 0
+      },
+      reviews: reviews?.map(r => ({
+        id: r.id,
+        title: r.title,
+        language: r.language,
+        status: r.status,
+        score: r.overall_score,
+        date: r.created_at
+      })) || []
+    });
+    
+  } catch (error) {
+    console.error('❌ User data test failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'User data test failed',
+      error: error.message
+    });
+  }
+});
 
 // Trust proxy for Render deployment
 app.set('trust proxy', 1);

@@ -1,24 +1,30 @@
-// src/config/api.js - FIXED VERSION
+// src/config/api.js - UPDATED VERSION with Profile History Fix
 // API Configuration for Frontend
 
-// Force production URL to fix the localhost issue
+// Use production URL
 const API_BASE_URL = 'https://codelens-backend-0xl0.onrender.com';
 
 console.log('API Base URL:', API_BASE_URL);
 
-// API endpoints - These match your backend routes exactly
+// API endpoints - Updated with new history endpoint
 export const API_ENDPOINTS = {
-  // AI Analysis endpoints - FIXED: All using production URL
+  // AI Analysis endpoints
   ANALYZE_CODE: `${API_BASE_URL}/api/ai/analyze`,
   REVIEW_CODE: `${API_BASE_URL}/api/ai/review`,
   GET_LANGUAGES: `${API_BASE_URL}/api/ai/languages`,
   DETECT_LANGUAGE: `${API_BASE_URL}/api/ai/detect-language`,
   
-  // Review endpoints
+  // Review endpoints - UPDATED with history endpoint
   GET_REVIEWS: `${API_BASE_URL}/api/reviews`,
+  GET_REVIEW_HISTORY: `${API_BASE_URL}/api/reviews/history`, // NEW: For Profile page
+  GET_REVIEW_STATS: `${API_BASE_URL}/api/reviews/stats`, // For analytics
   CREATE_REVIEW: `${API_BASE_URL}/api/reviews`,
   UPDATE_REVIEW: `${API_BASE_URL}/api/reviews`,
   DELETE_REVIEW: `${API_BASE_URL}/api/reviews`,
+  GET_PUBLIC_REVIEWS: `${API_BASE_URL}/api/reviews/public`,
+  ANALYZE_REVIEW: `${API_BASE_URL}/api/reviews`, // /:id/analyze
+  TOGGLE_FAVORITE: `${API_BASE_URL}/api/reviews`, // /:id/favorite
+  INCREMENT_USAGE: `${API_BASE_URL}/api/reviews/increment`,
   
   // Auth endpoints
   GITHUB_AUTH: `${API_BASE_URL}/api/auth/github`,
@@ -134,7 +140,7 @@ export const apiCall = async (endpoint, options = {}) => {
   }
 };
 
-// Code analysis function - FIXED to use correct endpoint
+// Code analysis function
 export const analyzeCode = async (code, language, options = {}) => {
   try {
     console.log('Analyzing code...');
@@ -155,6 +161,86 @@ export const analyzeCode = async (code, language, options = {}) => {
     console.error('Analysis error:', error);
     throw error;
   }
+};
+
+// NEW: Review history functions for Profile page
+export const getReviewHistory = async (page = 1, limit = 50) => {
+  try {
+    console.log('Fetching review history...');
+    return await apiCall(`${API_ENDPOINTS.GET_REVIEW_HISTORY}?page=${page}&limit=${limit}`);
+  } catch (error) {
+    console.error('Failed to fetch review history:', error);
+    throw error;
+  }
+};
+
+export const getReviewStats = async () => {
+  try {
+    console.log('Fetching review statistics...');
+    return await apiCall(API_ENDPOINTS.GET_REVIEW_STATS);
+  } catch (error) {
+    console.error('Failed to fetch review stats:', error);
+    throw error;
+  }
+};
+
+// Review management functions
+export const getReviews = async (options = {}) => {
+  const { page = 1, limit = 10, language, status, search } = options;
+  let endpoint = `${API_ENDPOINTS.GET_REVIEWS}?page=${page}&limit=${limit}`;
+  
+  if (language) endpoint += `&language=${encodeURIComponent(language)}`;
+  if (status) endpoint += `&status=${encodeURIComponent(status)}`;
+  if (search) endpoint += `&search=${encodeURIComponent(search)}`;
+  
+  return await apiCall(endpoint);
+};
+
+export const createReview = async (reviewData) => {
+  return await apiCall(API_ENDPOINTS.CREATE_REVIEW, {
+    method: 'POST',
+    body: JSON.stringify(reviewData),
+  });
+};
+
+export const updateReview = async (reviewId, updates) => {
+  return await apiCall(`${API_ENDPOINTS.UPDATE_REVIEW}/${reviewId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+};
+
+export const deleteReview = async (reviewId) => {
+  return await apiCall(`${API_ENDPOINTS.DELETE_REVIEW}/${reviewId}`, {
+    method: 'DELETE',
+  });
+};
+
+export const analyzeReview = async (reviewId) => {
+  return await apiCall(`${API_ENDPOINTS.ANALYZE_REVIEW}/${reviewId}/analyze`, {
+    method: 'POST',
+  });
+};
+
+export const toggleFavorite = async (reviewId) => {
+  return await apiCall(`${API_ENDPOINTS.TOGGLE_FAVORITE}/${reviewId}/favorite`, {
+    method: 'POST',
+  });
+};
+
+export const getPublicReviews = async (options = {}) => {
+  const { page = 1, limit = 10, language } = options;
+  let endpoint = `${API_ENDPOINTS.GET_PUBLIC_REVIEWS}?page=${page}&limit=${limit}`;
+  
+  if (language) endpoint += `&language=${encodeURIComponent(language)}`;
+  
+  return await apiCall(endpoint);
+};
+
+export const incrementReviewUsage = async () => {
+  return await apiCall(API_ENDPOINTS.INCREMENT_USAGE, {
+    method: 'POST',
+  });
 };
 
 // User profile functions
@@ -300,6 +386,16 @@ export default {
   updateUserProfile,
   getUserDashboard,
   getUserActivity,
+  getReviewHistory,        // NEW
+  getReviewStats,          // NEW
+  getReviews,              // ENHANCED
+  createReview,            // NEW
+  updateReview,            // NEW
+  deleteReview,            // NEW
+  analyzeReview,           // NEW
+  toggleFavorite,          // NEW
+  getPublicReviews,        // NEW
+  incrementReviewUsage,    // NEW
   logoutUser,
   checkHealth,
   getAuthToken,
