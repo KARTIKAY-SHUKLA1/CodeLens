@@ -50,8 +50,109 @@ router.post('/analyze', (req, res, next) => {
       isPublic = false 
     } = req.body;
 
-    // ... rest of your existing code (validation, AI service call, database operations, etc.)
+    // Validation
+    if (!code || typeof code !== 'string' || code.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Code is required and cannot be empty',
+        error: 'INVALID_CODE'
+      });
+    }
+
+    if (code.length > 50000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Code is too large. Maximum size is 50KB.',
+        error: 'CODE_TOO_LARGE'
+      });
+    }
+
+    if (!SUPPORTED_LANGUAGES.includes(language.toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: `Language '${language}' is not supported`,
+        error: 'UNSUPPORTED_LANGUAGE',
+        supportedLanguages: SUPPORTED_LANGUAGES
+      });
+    }
+
+    console.log('Analysis request validated successfully');
+
+    // Call AI service for analysis
+    const analysisResult = await aiService(code, language.toLowerCase());
     
+    if (!analysisResult) {
+      throw new Error('AI service returned no result');
+    }
+
+    // Extract metrics from analysis result
+    const metrics = analysisResult.metrics || {};
+    const statistics = analysisResult.statistics || {};
+
+    // Save code review to database
+    const { data: reviewData, error: reviewError } = await supabase
+      .from('code_reviews')
+      .insert({
+        user_id: req.user.id,
+        title: title,
+        code_content: code,
+        language: language.toLowerCase(),
+        file_name: fileName,
+        overall_score: analysisResult.overallScore || 0,
+        analysis_result: analysisResult,
+        issues_count: (analysisResult.issues || []).length,
+        suggestions_count: (analysisResult.suggestions || []).length,
+        status: analysisResult.error ? 'error' : 'completed',
+        is_public: isPublic || false,
+        is_favorite: false
+      })
+      .select('*')
+      .single();
+
+    if (reviewError) {
+      console.error('Error saving review to database:', reviewError);
+      throw new Error('Failed to save review to database');
+    }
+
+    console.log('Review saved to database:', reviewData.id);
+
+    // Save detailed metrics
+    const { error: metricsError } = await supabase
+      .from('review_metrics')
+      .insert({
+        review_id: reviewData.id,
+        complexity_score: metrics.complexity || 5,
+        maintainability_score: metrics.maintainability || 5,
+        security_score: metrics.security || 5,
+        performance_score: metrics.performance || 5,
+        readability_score: metrics.readability || 5,
+        test_coverage_score: metrics.testability || 5,
+        lines_of_code: statistics.totalLines || 0,
+        cyclomatic_complexity: statistics.complexity?.cyclomatic || 1
+      });
+
+    if (metricsError) {
+      console.warn('Error saving metrics:', metricsError);
+      // Don't fail the request for metrics error
+    }
+
+    // Update user credits
+    const { error: creditError } = await supabase
+      .from('users')
+      .update({ 
+        credits_used: req.user.credits_used + 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', req.user.id);
+
+    if (creditError) {
+      console.error('Error updating user credits:', creditError);
+      // Don't fail the request for credit update error
+    }
+
+    const processingTime = Date.now() - startTime;
+    console.log(`Analysis completed in ${processingTime}ms`);
+
     // Return successful response
     res.json({
       success: true,
@@ -74,9 +175,10 @@ router.post('/analyze', (req, res, next) => {
 
   } catch (error) {
     console.error('AI Analysis Error:', error);
-    
+
     const processingTime = Date.now() - startTime;
     
+    // Return error response
     res.status(500).json({
       success: false,
       message: error.message || 'Code analysis failed',
