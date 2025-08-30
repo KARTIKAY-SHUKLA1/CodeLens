@@ -6,7 +6,6 @@ import { useTheme } from '../components/ThemeProvider';
 import useAuth from '../hooks/useAuth';
 
 function Dashboard({ onNavigate, user }) {
-  const { setUserData } = useAuth(); // Add this line - destructure setUserData from useAuth
   
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('javascript');
@@ -124,10 +123,8 @@ function Dashboard({ onNavigate, user }) {
       finalLanguage,
     });
 
-    // Update reviewsUsed safely without mutating user object
-    if (user) {
-      setUserData({ ...user, reviewsUsed: user.reviewsUsed + 1 }, token);
-    }
+    // Backend already updated credits, no need to update frontend state
+    // The next profile fetch will get the updated credit count
   } catch (err) {
     console.error("Analysis error:", err);
     setError({
