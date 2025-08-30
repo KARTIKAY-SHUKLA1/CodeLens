@@ -1,7 +1,7 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { authenticateToken } = require('../middleware/auth.middleware');
+const { authenticateToken, checkCredits } = require('../middleware/auth.middleware');
+const aiService = require('../services/ai.service');
 
 const router = express.Router();
 
@@ -17,579 +17,236 @@ const supabase = createClient(
   }
 );
 
-// GitHub OAuth URLs
-const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
-const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
-const FRONTEND_URL = process.env.CORS_ORIGIN || 'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app';
+// Language configuration for supported languages
+const SUPPORTED_LANGUAGES = [
+  'javascript', 'typescript', 'python', 'java', 'cpp', 'c', 
+  'csharp', 'go', 'rust', 'php', 'ruby', 'swift', 'kotlin'
+];
 
-// ADDED: Missing /auth/error route
-// @route   GET /api/auth/error
-// @desc    Handle OAuth authentication errors
-// @access  Public
-router.get('/error', (req, res) => {
+// @route   POST /api/ai/analyze
+// @desc    Analyze code using AI and save to database
+// @access  Private (requires authentication and credits)
+router.post('/analyze', (req, res, next) => {
+  console.log('🎯 ANALYZE ROUTE REACHED - Route exists and is being hit');
+  next();
+}, authenticateToken, (req, res, next) => {
+  console.log('✅ AUTH PASSED - User authenticated');
+  next();
+}, checkCredits, async (req, res) => {
+  console.log('✅ CREDITS PASSED - Starting analysis');
+  
+  const startTime = Date.now();
+  
   try {
-    console.log('=== Auth Error Handler ===');
-    const error = req.query.error || 'unknown_error';
-    const errorDescription = req.query.error_description || '';
+    console.log('=== AI Analysis Request ===');
+    console.log('User ID:', req.user.id);
+    console.log('Credits used/limit:', req.user.credits_used, '/', req.user.credits_limit);
+
+    const { 
+      code, 
+      language = 'javascript', 
+      fileName = 'untitled',
+      title = 'Code Review',
+      isPublic = false 
+    } = req.body;
+
+    // ... rest of your existing code (validation, AI service call, database operations, etc.)
     
-    console.log('OAuth Error:', error, errorDescription);
-    
-    // Map common OAuth errors to user-friendly messages
-    const errorMessages = {
-      'invalid_state': 'Authentication failed due to security validation. Please try signing in again.',
-      'access_denied': 'GitHub authentication was cancelled. Please try again.',
-      'github_auth_failed': 'GitHub authentication failed. Please try again.',
-      'google_auth_failed': 'Google authentication failed. Please try again.',
-      'token_exchange_failed': 'Failed to complete authentication. Please try again.',
-      'user_data_failed': 'Failed to retrieve user information. Please try again.',
-      'database_error': 'A system error occurred. Please try again later.',
-      'callback_failed': 'Authentication callback failed. Please try again.',
-      'no_code': 'Authentication code missing. Please try again.',
-      'no_access_token': 'Failed to obtain access token. Please try again.'
-    };
-    
-    const userMessage = errorMessages[error] || 'An authentication error occurred. Please try again.';
-    
-    // Redirect to frontend with error information
-    const errorUrl = `${FRONTEND_URL}/auth/error?` +
-      `error=${encodeURIComponent(error)}&` +
-      `message=${encodeURIComponent(userMessage)}`;
-    
-    console.log('Redirecting to error page:', errorUrl);
-    res.redirect(errorUrl);
-    
-  } catch (err) {
-    console.error('Error in auth error handler:', err);
-    // Fallback redirect
-    res.redirect(`${FRONTEND_URL}?auth_error=handler_failed`);
-  }
-});
-
-// @route   GET /api/auth/github
-// @desc    Initiate GitHub OAuth
-// @access  Public
-router.get('/github', (req, res) => {
-  try {
-    console.log('=== GitHub OAuth Initiation ===');
-    
-    if (!GITHUB_CLIENT_ID) {
-      console.error('❌ GitHub Client ID not configured');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=oauth_not_configured`);
-    }
-
-    // FIXED: Generate state parameter and store it properly
-    const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    
-    // Store state in session
-    if (!req.session) {
-      console.error('❌ Session not available');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=session_error`);
-    }
-    
-    req.session.oauthState = state;
-    
-    // FIXED: Use your actual backend URL
-    const redirectUri = process.env.NODE_ENV === 'production' 
-      ? 'https://codelens-backend-0xl0.onrender.com/api/auth/github/callback'
-      : 'https://codelens-backend-0xl0.onrender.com/api/auth/github/callback';
-
-    const githubAuthURL = `https://github.com/login/oauth/authorize?` +
-      `client_id=${GITHUB_CLIENT_ID}&` +
-      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-      `scope=user:email&` +
-      `state=${state}`;
-
-    console.log('🔗 Redirecting to GitHub OAuth:', githubAuthURL);
-    res.redirect(githubAuthURL);
-
-  } catch (error) {
-    console.error('❌ GitHub OAuth initiation error:', error);
-    res.redirect(`${FRONTEND_URL}/auth/error?error=oauth_init_failed`);
-  }
-});
-
-// @route   GET /api/auth/github/callback
-// @desc    Handle GitHub OAuth callback
-// @access  Public
-router.get('/github/callback', async (req, res) => {
-  try {
-    console.log('=== GitHub OAuth Callback ===');
-    
-    const { code, state, error } = req.query;
-    
-    if (error) {
-      console.error('❌ GitHub OAuth error:', error);
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=${encodeURIComponent(error)}`);
-    }
-
-    if (!code) {
-      console.error('❌ No authorization code received');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=no_code`);
-    }
-
-    // FIXED: Better state validation with fallback
-    if (req.session && req.session.oauthState && state !== req.session.oauthState) {
-      console.error('❌ Invalid state parameter. Expected:', req.session.oauthState, 'Got:', state);
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=invalid_state`);
-    } else if (!req.session) {
-      console.warn('⚠️ No session available for state validation - proceeding anyway');
-    }
-
-    console.log('✅ Authorization code received, exchanging for access token');
-
-    // Exchange code for access token
-    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        client_id: GITHUB_CLIENT_ID,
-        client_secret: GITHUB_CLIENT_SECRET,
-        code: code,
-      }),
-    });
-
-    const tokenData = await tokenResponse.json();
-    
-    if (tokenData.error) {
-      console.error('❌ Token exchange error:', tokenData.error);
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=token_exchange_failed`);
-    }
-
-    const accessToken = tokenData.access_token;
-    if (!accessToken) {
-      console.error('❌ No access token received');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=no_access_token`);
-    }
-
-    console.log('✅ Access token received, fetching user data');
-
-    // Fetch user data from GitHub
-    const userResponse = await fetch('https://api.github.com/user', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-      },
-    });
-
-    const userData = await userResponse.json();
-    
-    if (!userData.id) {
-      console.error('❌ Failed to get user data from GitHub');
-      return res.redirect(`${FRONTEND_URL}/auth/error?error=user_data_failed`);
-    }
-
-    console.log('✅ GitHub user data received:', userData.login);
-
-    // Fetch user email (might be private)
-    const emailResponse = await fetch('https://api.github.com/user/emails', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-      },
-    });
-
-    const emails = await emailResponse.json();
-    const primaryEmail = Array.isArray(emails) ? emails.find(email => email.primary)?.email || userData.email : userData.email;
-
-    // Check if user exists in database
-    const { data: existingUser, error: selectError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('github_id', userData.id.toString())
-      .single();
-
-    let user;
-    const isNewUser = !existingUser;
-
-    if (existingUser) {
-      // Update existing user
-      const { data: updatedUser, error: updateError } = await supabase
-        .from('users')
-        .update({
-          username: userData.login,
-          name: userData.name || userData.login,
-          email: primaryEmail || existingUser.email,
-          avatar_url: userData.avatar_url,
-          github_profile_url: userData.html_url,
-          last_login: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', existingUser.id)
-        .select('*')
-        .single();
-
-      if (updateError) {
-        console.error('❌ Error updating existing user:', updateError);
-        return res.redirect(`${FRONTEND_URL}/auth/error?error=database_error`);
-      }
-
-      user = updatedUser;
-      console.log('✅ Existing user updated:', user.id);
-    } else {
-      // Create new user
-      const { data: newUser, error: insertError } = await supabase
-        .from('users')
-        .insert({
-          github_id: userData.id.toString(),
-          username: userData.login,
-          name: userData.name || userData.login,
-          email: primaryEmail,
-          avatar_url: userData.avatar_url,
-          github_profile_url: userData.html_url,
-          plan: 'free',
-          credits_used: 0,
-          credits_limit: 100,
-          created_at: new Date().toISOString(),
-          last_login: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select('*')
-        .single();
-
-      if (insertError) {
-        console.error('❌ Error creating new user:', insertError);
-        return res.redirect(`${FRONTEND_URL}/auth/error?error=database_error`);
-      }
-
-      user = newUser;
-      console.log('✅ New user created:', user.id);
-    }
-
-    // Generate JWT token
-    const jwtPayload = {
-      userId: user.id,
-      id: user.id, // For backward compatibility
-      email: user.email,
-      username: user.username,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
-    };
-
-    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET);
-
-    console.log('✅ JWT token generated for user:', user.id);
-
-    // FIXED: Clear OAuth state safely
-    if (req.session && req.session.oauthState) {
-      delete req.session.oauthState;
-    }
-
-    // Redirect to frontend with token and user data
-    const callbackUrl = `${FRONTEND_URL}/auth/callback?` +
-      `token=${encodeURIComponent(token)}&` +
-      `user=${encodeURIComponent(JSON.stringify({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar_url,
-        githubUsername: user.username,
-        plan: user.plan || 'free',
-        reviewsUsed: user.credits_used || 0,
-        reviewsLimit: user.credits_limit || 100,
-        isNewUser: isNewUser
-      }))}&` +
-      `isNewUser=${isNewUser}`;
-
-    console.log('🔗 Redirecting to frontend callback');
-    res.redirect(callbackUrl);
-
-  } catch (error) {
-    console.error('❌ GitHub OAuth callback error:', error);
-    res.redirect(`${FRONTEND_URL}/auth/error?error=callback_failed`);
-  }
-});
-
-// Rest of your existing routes remain the same...
-// @route   POST /api/auth/github/callback
-// @desc    Handle GitHub OAuth callback (for API calls)
-// @access  Public
-router.post('/github/callback', async (req, res) => {
-  try {
-    const { code, state } = req.body;
-    
-    if (!code) {
-      return res.status(400).json({
-        success: false,
-        message: 'Authorization code is required',
-        error: 'MISSING_CODE'
-      });
-    }
-
-    // Exchange code for access token (same logic as GET callback)
-    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        client_id: GITHUB_CLIENT_ID,
-        client_secret: GITHUB_CLIENT_SECRET,
-        code: code,
-      }),
-    });
-
-    const tokenData = await tokenResponse.json();
-    
-    if (tokenData.error) {
-      return res.status(400).json({
-        success: false,
-        message: 'Failed to exchange authorization code',
-        error: 'TOKEN_EXCHANGE_FAILED',
-        details: tokenData.error
-      });
-    }
-
-    const accessToken = tokenData.access_token;
-    if (!accessToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'No access token received from GitHub',
-        error: 'NO_ACCESS_TOKEN'
-      });
-    }
-
-    // Fetch user data from GitHub
-    const [userResponse, emailResponse] = await Promise.all([
-      fetch('https://api.github.com/user', {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      }),
-      fetch('https://api.github.com/user/emails', {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      })
-    ]);
-
-    const [userData, emails] = await Promise.all([
-      userResponse.json(),
-      emailResponse.json()
-    ]);
-
-    if (!userData.id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Failed to get user data from GitHub',
-        error: 'USER_DATA_FAILED'
-      });
-    }
-
-    const primaryEmail = Array.isArray(emails) ? emails.find(email => email.primary)?.email || userData.email : userData.email;
-
-    // Check if user exists in database
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('*')
-      .eq('github_id', userData.id.toString())
-      .single();
-
-    let user;
-    const isNewUser = !existingUser;
-
-    if (existingUser) {
-      // Update existing user
-      const { data: updatedUser, error: updateError } = await supabase
-        .from('users')
-        .update({
-          username: userData.login,
-          name: userData.name || userData.login,
-          email: primaryEmail || existingUser.email,
-          avatar_url: userData.avatar_url,
-          github_profile_url: userData.html_url,
-          last_login: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', existingUser.id)
-        .select('*')
-        .single();
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      user = updatedUser;
-    } else {
-      // Create new user
-      const { data: newUser, error: insertError } = await supabase
-        .from('users')
-        .insert({
-          github_id: userData.id.toString(),
-          username: userData.login,
-          name: userData.name || userData.login,
-          email: primaryEmail,
-          avatar_url: userData.avatar_url,
-          github_profile_url: userData.html_url,
-          plan: 'free',
-          credits_used: 0,
-          credits_limit: 100,
-          created_at: new Date().toISOString(),
-          last_login: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select('*')
-        .single();
-
-      if (insertError) {
-        throw insertError;
-      }
-
-      user = newUser;
-    }
-
-    // Generate JWT token
-    const jwtPayload = {
-      userId: user.id,
-      id: user.id,
-      email: user.email,
-      username: user.username,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60)
-    };
-
-    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET);
-
+    // Return successful response
     res.json({
       success: true,
-      token: token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar_url,
-        githubUsername: user.username,
-        plan: user.plan || 'free',
-        reviewsUsed: user.credits_used || 0,
-        reviewsLimit: user.credits_limit || 100,
-        isNewUser: isNewUser
+      message: 'Code analysis completed successfully',
+      data: {
+        reviewId: reviewData.id,
+        analysis: analysisResult,
+        metadata: {
+          ...analysisResult.metadata,
+          reviewId: reviewData.id,
+          processingTime: `${processingTime}ms`
+        }
       },
-      isNewUser: isNewUser
+      credits: {
+        used: req.user.credits_used + 1,
+        remaining: req.user.credits_limit - req.user.credits_used - 1,
+        limit: req.user.credits_limit
+      }
     });
 
   } catch (error) {
-    console.error('Auth callback error:', error);
+    console.error('AI Analysis Error:', error);
+    
+    const processingTime = Date.now() - startTime;
+    
     res.status(500).json({
       success: false,
-      message: 'Authentication failed',
-      error: 'AUTH_FAILED',
-      details: error.message
-    });
-  }
-});
-
-// @route   POST /api/auth/verify-token
-// @desc    Verify JWT token
-// @access  Public
-router.post('/verify-token', async (req, res) => {
-  try {
-    const { token } = req.body;
-    
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        message: 'Token is required',
-        error: 'MISSING_TOKEN'
-      });
-    }
-
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId || decoded.id;
-
-    // Get user from database
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (error || !user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid token',
-        error: 'INVALID_TOKEN'
-      });
-    }
-
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar_url,
-        githubUsername: user.username,
-        plan: user.plan || 'free',
-        reviewsUsed: user.credits_used || 0,
-        reviewsLimit: user.credits_limit || 100,
-        isNewUser: false
+      message: error.message || 'Code analysis failed',
+      error: error.message.includes('API_KEY') ? 'AI_SERVICE_CONFIG_ERROR' : 'ANALYSIS_FAILED',
+      metadata: {
+        processingTime: `${processingTime}ms`,
+        timestamp: new Date().toISOString()
       }
     });
-
-  } catch (error) {
-    console.error('Token verification error:', error);
-    res.status(401).json({
-      success: false,
-      message: 'Invalid or expired token',
-      error: 'TOKEN_INVALID'
-    });
   }
 });
 
-// @route   GET /api/auth/me
-// @desc    Get current user
+// @route   GET /api/ai/languages
+// @desc    Get supported programming languages
+// @access  Public
+router.get('/languages', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      languages: SUPPORTED_LANGUAGES.map(lang => ({
+        id: lang,
+        name: lang.charAt(0).toUpperCase() + lang.slice(1),
+        extension: getLanguageExtension(lang)
+      })),
+      totalSupported: SUPPORTED_LANGUAGES.length
+    }
+  });
+});
+
+// @route   POST /api/ai/quick-analyze
+// @desc    Quick analysis without saving to database (for demos/previews)
 // @access  Private
-router.get('/me', authenticateToken, async (req, res) => {
+router.post('/quick-analyze', authenticateToken, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
+    const { code, language = 'javascript' } = req.body;
+
+    // Basic validation
+    if (!code || code.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Code is required',
+        error: 'INVALID_CODE'
+      });
+    }
+
+    if (code.length > 10000) { // Smaller limit for quick analysis
+      return res.status(400).json({
+        success: false,
+        message: 'Code too large for quick analysis (10KB max)',
+        error: 'CODE_TOO_LARGE'
+      });
+    }
+
+    // Perform analysis without saving
+    const analysisResult = await aiService(code, language.toLowerCase());
+    
+    const processingTime = Date.now() - startTime;
+
     res.json({
       success: true,
-      user: {
-        id: req.user.id,
-        name: req.user.name,
-        email: req.user.email,
-        avatar: req.user.avatar_url,
-        githubUsername: req.user.username,
-        plan: req.user.plan || 'free',
-        reviewsUsed: req.user.credits_used || 0,
-        reviewsLimit: req.user.credits_limit || 100,
-        isNewUser: false
+      message: 'Quick analysis completed',
+      data: {
+        analysis: {
+          ...analysisResult,
+          metadata: {
+            ...analysisResult.metadata,
+            processingTime: `${processingTime}ms`,
+            quickAnalysis: true
+          }
+        }
       }
     });
+
   } catch (error) {
-    console.error('Get me error:', error);
+    console.error('Quick Analysis Error:', error);
+    
     res.status(500).json({
       success: false,
-      message: 'Failed to get user data',
-      error: 'SERVER_ERROR'
+      message: 'Quick analysis failed',
+      error: 'QUICK_ANALYSIS_FAILED'
     });
   }
 });
 
-// @route   POST /api/auth/logout
-// @desc    Logout user
+// @route   GET /api/ai/stats
+// @desc    Get user's analysis statistics
 // @access  Private
-router.post('/logout', authenticateToken, async (req, res) => {
+router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    // In a real app, you might want to blacklist the token or store it in a revoked tokens list
-    // For now, we'll just return success and let the client remove the token
+    // Get user's review statistics
+    const { data: reviews, error: reviewError } = await supabase
+      .from('code_reviews')
+      .select('id, language, overall_score, created_at, status')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false });
+
+    if (reviewError) {
+      throw new Error('Failed to fetch review statistics');
+    }
+
+    // Calculate statistics
+    const totalReviews = reviews.length;
+    const completedReviews = reviews.filter(r => r.status === 'completed');
+    const averageScore = completedReviews.length > 0 
+      ? completedReviews.reduce((sum, r) => sum + r.overall_score, 0) / completedReviews.length
+      : 0;
+
+    // Language breakdown
+    const languageStats = reviews.reduce((acc, review) => {
+      acc[review.language] = (acc[review.language] || 0) + 1;
+      return acc;
+    }, {});
+
+    // Recent activity (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const recentReviews = reviews.filter(r => 
+      new Date(r.created_at) >= thirtyDaysAgo
+    ).length;
+
     res.json({
       success: true,
-      message: 'Logged out successfully'
+      data: {
+        totalReviews,
+        completedReviews: completedReviews.length,
+        averageScore: Math.round(averageScore * 10) / 10,
+        languageStats,
+        recentActivity: recentReviews,
+        credits: {
+          used: req.user.credits_used,
+          remaining: req.user.credits_limit - req.user.credits_used,
+          limit: req.user.credits_limit,
+          percentage: Math.round((req.user.credits_used / req.user.credits_limit) * 100)
+        }
+      }
     });
+
   } catch (error) {
-    console.error('Logout error:', error);
+    console.error('Stats Error:', error);
+    
     res.status(500).json({
       success: false,
-      message: 'Logout failed',
-      error: 'SERVER_ERROR'
+      message: 'Failed to fetch statistics',
+      error: 'STATS_FAILED'
     });
   }
 });
+
+// Helper function to get language file extension
+function getLanguageExtension(language) {
+  const extensions = {
+    'javascript': '.js',
+    'typescript': '.ts',
+    'python': '.py',
+    'java': '.java',
+    'cpp': '.cpp',
+    'c': '.c',
+    'csharp': '.cs',
+    'go': '.go',
+    'rust': '.rs',
+    'php': '.php',
+    'ruby': '.rb',
+    'swift': '.swift',
+    'kotlin': '.kt'
+  };
+  
+  return extensions[language.toLowerCase()] || '.txt';
+}
 
 module.exports = router;

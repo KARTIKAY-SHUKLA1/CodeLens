@@ -28,12 +28,26 @@ const updateProfileSchema = Joi.object({
   blog: Joi.string().uri().max(255).optional().allow('')
 });
 
+// Replace the preferencesSchema in your user.routes.js file with this:
+
 const preferencesSchema = Joi.object({
-  primaryLanguages: Joi.array().items(Joi.string()).optional(),
+  // Frontend sends 'favoriteLanguages' 
+  favoriteLanguages: Joi.array().items(Joi.string()).optional(),
+  primaryLanguages: Joi.array().items(Joi.string()).optional(), // Keep for backwards compatibility
+  
+  // Frontend sends 'experience' 
+  experience: Joi.string().allow('').optional(),
+  experienceLevel: Joi.string().valid('beginner', 'intermediate', 'advanced').optional(), // Keep for backwards compatibility
+  
+  // Frontend sends 'notifications'
+  notifications: Joi.boolean().optional(),
+  
+  // This already matches
+  goals: Joi.array().items(Joi.string()).optional(),
+  
+  // Keep existing fields for backwards compatibility
   codeStyle: Joi.string().valid('readable', 'compact', 'performant').optional(),
-  reviewFocus: Joi.string().valid('bugs', 'performance', 'style', 'security').optional(),
-  experienceLevel: Joi.string().valid('beginner', 'intermediate', 'advanced').optional(),
-  goals: Joi.array().items(Joi.string()).optional()
+  reviewFocus: Joi.string().valid('bugs', 'performance', 'style', 'security').optional()
 });
 
 // @route   GET /api/users/profile

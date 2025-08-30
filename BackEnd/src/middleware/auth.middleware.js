@@ -222,7 +222,6 @@ const checkCredits = (req, res, next) => {
       upgradeUrl: '/upgrade'
     });
   }
-
   next();
 };
 
