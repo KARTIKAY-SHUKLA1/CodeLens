@@ -75,7 +75,7 @@ const fetchUserStatistics = async () => {
     console.log("📡 Fetching user stats + history from backend...");
 
     // ✅ Real API call
-    const response = await apiCall(`/api/test/user-data/${user.id}`, "GET");
+    const response = await apiCall(API_ENDPOINTS.GET_REVIEW_HISTORY, "GET");
 
     if (response.success) {
       const reviewData = response.reviews || [];

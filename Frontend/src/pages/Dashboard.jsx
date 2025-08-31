@@ -16,6 +16,10 @@ function Dashboard({ onNavigate, user }) {
 
   // Get theme using the hook
   const { isDark } = useTheme();
+  
+  // FIXED: Import setUserData from useAuth hook
+  const { setUserData, updateReviewUsage } = useAuth();
+  
   const theme = isDark ? 'dark' : 'light';
 
   const languages = [
@@ -34,108 +38,122 @@ function Dashboard({ onNavigate, user }) {
   ];
 
   const handleAnalyze = async () => {
-  if (!code.trim()) return;
+    if (!code.trim()) return;
 
-  if (user && user.reviewsUsed >= user.reviewsLimit) {
-    alert("You've reached your review limit! Upgrade to Pro for unlimited reviews.");
-    return;
-  }
-
-  setIsAnalyzing(true);
-  setError(null);
-  setWarnings([]);
-  setAnalysis(null);
-
-  try {
-    // DETECT LANGUAGE AUTOMATICALLY
-    const detectedLanguage = languageDetector.detectLanguage(code);
-    setAutoDetectedLang(detectedLanguage);
-
-    // Check for language mismatch
-    let warningsArray = [];
-    if (detectedLanguage !== language && detectedLanguage !== "plaintext") {
-      warningsArray.push({
-        type: "language_mismatch",
-        message: `Code appears to be ${
-          languages.find((l) => l.id === detectedLanguage)?.name || detectedLanguage
-        } but ${languages.find((l) => l.id === language)?.name} is selected. Analysis will use detected language for better accuracy.`,
-        detectedLanguage: detectedLanguage,
-        selectedLanguage: language,
-      });
+    if (user && user.reviewsUsed >= user.reviewsLimit) {
+      alert("You've reached your review limit! Upgrade to Pro for unlimited reviews.");
+      return;
     }
 
-    // Use detected language if not plaintext
-    const finalLanguage = detectedLanguage !== "plaintext" ? detectedLanguage : language;
+    setIsAnalyzing(true);
+    setError(null);
+    setWarnings([]);
+    setAnalysis(null);
 
-    // Get token safely
-    const token = getAuthToken();
+    try {
+      // DETECT LANGUAGE AUTOMATICALLY
+      const detectedLanguage = languageDetector.detectLanguage(code);
+      setAutoDetectedLang(detectedLanguage);
 
-    const response = await fetch(API_ENDPOINTS.ANALYZE_CODE, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-      body: JSON.stringify({
-        code,
-        language: finalLanguage,
-        selectedLanguage: language,
-        preferences: {
-          strictness: "balanced",
-          focusAreas: ["quality", "security", "performance"],
-          verbosity: "detailed",
+      // Check for language mismatch
+      let warningsArray = [];
+      if (detectedLanguage !== language && detectedLanguage !== "plaintext") {
+        warningsArray.push({
+          type: "language_mismatch",
+          message: `Code appears to be ${
+            languages.find((l) => l.id === detectedLanguage)?.name || detectedLanguage
+          } but ${languages.find((l) => l.id === language)?.name} is selected. Analysis will use detected language for better accuracy.`,
+          detectedLanguage: detectedLanguage,
+          selectedLanguage: language,
+        });
+      }
+
+      // Use detected language if not plaintext
+      const finalLanguage = detectedLanguage !== "plaintext" ? detectedLanguage : language;
+
+      // Get token safely
+      const token = getAuthToken();
+
+      const response = await fetch(API_ENDPOINTS.ANALYZE_CODE, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token && { Authorization: `Bearer ${token}` }),
         },
-      }),
-    });
+        body: JSON.stringify({
+          code,
+          language: finalLanguage,
+          selectedLanguage: language,
+          preferences: {
+            strictness: "balanced",
+            focusAreas: ["quality", "security", "performance"],
+            verbosity: "detailed",
+          },
+        }),
+      });
 
-    // ADD DEBUG LOGGING HERE
-    console.log("Response status:", response.status);
-    console.log("Response ok:", response.ok);
-    
-    const result = await response.json();
-    
-    // ADD MORE DEBUG LOGGING
-    console.log("Full API Response:", result);
-    console.log("Result success field:", result.success);
-    console.log("Result analysis field:", result.analysis);
+      // ADD DEBUG LOGGING HERE
+      console.log("Response status:", response.status);
+      console.log("Response ok:", response.ok);
+      
+      const result = await response.json();
+      
+      // ADD MORE DEBUG LOGGING
+      console.log("Full API Response:", result);
+      console.log("Result success field:", result.success);
+      console.log("Result analysis field:", result.analysis);
 
-    // MODIFIED SUCCESS CHECK - try both conditions
-    if (!response.ok || (!result.success && !result.analysis)) {
-      console.error("API Error - Result:", result);
-      throw new Error(result.error?.message || result.message || "Analysis failed");
+      // MODIFIED SUCCESS CHECK - try both conditions
+      if (!response.ok || (!result.success && !result.analysis)) {
+        console.error("API Error - Result:", result);
+        throw new Error(result.error?.message || result.message || "Analysis failed");
+      }
+
+      // Merge warnings
+      if (result.warnings) warningsArray = [...warningsArray, ...result.warnings];
+      setWarnings(warningsArray);
+
+      // CORRECTED: Handle the actual backend response structure
+      const analysisData = result.data?.analysis || result.analysis || result.data || result;
+      
+      console.log("Setting analysis data:", analysisData);
+
+      // Set the analysis safely
+      setAnalysis({
+        ...analysisData,
+        detectedLanguage,
+        selectedLanguage: language,
+        finalLanguage,
+      });
+
+      // FIXED: Update user credits if analysis was successful and user state management is available
+      if (result.creditsInfo && setUserData && user) {
+        // Update the user's credit usage
+        const updatedUser = {
+          ...user,
+          reviewsUsed: result.creditsInfo.used,
+          reviewsLimit: result.creditsInfo.limit
+        };
+        setUserData(updatedUser);
+        console.log('Updated user credits:', result.creditsInfo);
+      } else if (updateReviewUsage && result.creditsInfo) {
+        // Alternative: use the specific update function
+        updateReviewUsage(result.creditsInfo);
+      }
+
+    } catch (err) {
+      console.error("Analysis error:", err);
+      setError({
+        type: "analysis_error",
+        title: "Analysis Failed",
+        message: err.message || "Unable to analyze code. Please try again.",
+      });
+    } finally {
+      setIsAnalyzing(false);
     }
+  };
 
-    // Merge warnings
-    if (result.warnings) warningsArray = [...warningsArray, ...result.warnings];
-    setWarnings(warningsArray);
-
-    // CORRECTED: Handle the actual backend response structure
-    const analysisData = result.data?.analysis || result.analysis || result.data || result;
-    
-    console.log("Setting analysis data:", analysisData);
-
-    // Set the analysis safely
-    setAnalysis({
-      ...analysisData,
-      detectedLanguage,
-      selectedLanguage: language,
-      finalLanguage,
-    });
-
-    // Backend already updated credits, no need to update frontend state
-    // The next profile fetch will get the updated credit count
-  } catch (err) {
-    console.error("Analysis error:", err);
-    setError({
-      type: "analysis_error",
-      title: "Analysis Failed",
-      message: err.message || "Unable to analyze code. Please try again.",
-    });
-  } finally {
-    setIsAnalyzing(false);
-  }
-};
-
+  // Rest of your component code remains the same...
   const getScoreColor = (score) => {
     if (score >= 9) return 'text-emerald-400';
     if (score >= 7) return 'text-blue-400';
@@ -331,7 +349,7 @@ function Dashboard({ onNavigate, user }) {
             </div>
           </div>
 
-          {/* Analysis Results */}
+          {/* Analysis Results - Rest of the component remains the same */}
           <div className="space-y-4">
             <h2 className={`text-xl font-semibold ${themeClasses.textPrimary}`}>Analysis Results</h2>
             
@@ -532,7 +550,7 @@ function Dashboard({ onNavigate, user }) {
                 )}
               </div>
             )}
-
+            
             {/* General Error */}
             {error && (
               <div className="rounded-xl p-6 border shadow-lg bg-red-500/10 border-red-500/30">
