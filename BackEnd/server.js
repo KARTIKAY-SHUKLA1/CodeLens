@@ -2,7 +2,13 @@
 require('dotenv').config();
 
 // Validate required environment variables
-const requiredEnvVars = ['JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
+const requiredEnvVars = [
+  'JWT_SECRET', 
+  'SUPABASE_URL', 
+  'SUPABASE_SERVICE_KEY',
+  'STRIPE_SECRET_KEY',        // NEW: Add Stripe secret key
+  'STRIPE_PUBLISHABLE_KEY'    // NEW: Add Stripe publishable key
+];
 const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 
 if (missingEnvVars.length > 0) {
@@ -11,6 +17,7 @@ if (missingEnvVars.length > 0) {
 }
 
 console.log('Gemini API key found');
+console.log('Stripe keys configured'); // NEW: Log Stripe status
 
 const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
@@ -20,6 +27,9 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const session = require('express-session');
 const passport = require('passport');
+
+// NEW: Initialize Stripe
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 // Initialize Supabase
 const supabase = createClient(
@@ -72,6 +82,71 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
+
+// NEW: Stripe webhook endpoint - MUST be before express.json() middleware
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+        const session = event.data.object;
+        console.log('Payment successful:', session.id);
+        
+        // Update user subscription in database
+        const { error } = await supabase
+          .from('users')
+          .update({ 
+            subscription_status: 'active',
+            subscription_tier: 'pro',
+            stripe_customer_id: session.customer,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', session.metadata.user_id);
+
+        if (error) {
+          console.error('Error updating user subscription:', error);
+        }
+        break;
+
+      case 'customer.subscription.updated':
+      case 'customer.subscription.deleted':
+        const subscription = event.data.object;
+        console.log('Subscription updated:', subscription.id);
+        
+        // Update subscription status
+        const status = subscription.status === 'active' ? 'active' : 'inactive';
+        const tier = status === 'active' ? 'pro' : 'free';
+        
+        await supabase
+          .from('users')
+          .update({ 
+            subscription_status: status,
+            subscription_tier: tier,
+            updated_at: new Date().toISOString()
+          })
+          .eq('stripe_customer_id', subscription.customer);
+        break;
+
+      default:
+        console.log(`Unhandled event type ${event.type}`);
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+});
 
 // Session middleware - CRITICAL for OAuth state management
 app.use(session({
@@ -169,6 +244,7 @@ app.get('/', (req, res) => {
       users: '/api/users/*',
       ai: '/api/ai/*',
       reviews: '/api/reviews/*',
+      payments: '/api/payments/*',  // NEW: Payment endpoints
       health: '/health'
     }
   });
@@ -179,12 +255,14 @@ const authRoutes = require('./src/routes/auth.routes');
 const userRoutes = require('./src/routes/user.routes');
 const aiRoutes = require('./src/routes/ai.routes');
 const reviewRoutes = require('./src/routes/review.routes');
+const paymentRoutes = require('./src/routes/payment.routes'); // NEW: Payment routes
 
 // API Routes - CRITICAL: This handles all your endpoints
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
-app.use('/api/reviews', reviewRoutes); // This handles /api/reviews/history
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/payments', paymentRoutes); // NEW: Payment routes
 
 // Catch-all for undefined routes
 app.use('*', (req, res) => {
@@ -199,6 +277,7 @@ app.use('*', (req, res) => {
       '/api/users/*', 
       '/api/ai/*',
       '/api/reviews/*',
+      '/api/payments/*', // NEW
       '/health'
     ]
   });
@@ -275,6 +354,7 @@ const server = app.listen(PORT, () => {
   console.log(`- SUPABASE_SERVICE_KEY: ${process.env.SUPABASE_SERVICE_KEY ? 'Loaded' : 'Missing'}`);
   console.log(`- GOOGLE_GEMINI_KEY: ${process.env.GOOGLE_GEMINI_KEY ? 'Loaded' : 'Missing'}`);
   console.log(`- GitHub OAuth: ${process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET ? 'Configured' : 'Missing'}`);
+  console.log(`- Stripe: ${process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PUBLISHABLE_KEY ? 'Configured' : 'Missing'}`); // NEW
 });
 
 // Handle server startup errors
@@ -312,7 +392,7 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Handle unhandled rejections and exceptions
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejections', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise);
   console.error('Reason:', reason);
 });
