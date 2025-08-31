@@ -2,7 +2,7 @@
 // API Configuration for Frontend
 
 // Use production URL
-const API_BASE_URL = 'https://codelens-backend-0xl0.onrender.com';
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 console.log('API Base URL:', API_BASE_URL);
 
@@ -37,9 +37,9 @@ export const API_ENDPOINTS = {
   GET_PROFILE: `${API_BASE_URL}/api/users/profile`,
   UPDATE_PREFERENCES: `${API_BASE_URL}/api/users/preferences`,
   UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
-  GET_DASHBOARD: `${API_BASE_URL}/api/users/dashboard`,
+  GET_DASHBOARD: `${API_BASE_URL}/api/reviews/stats`,
   GET_ACTIVITY: `${API_BASE_URL}/api/users/activity`,
-  GET_USER_HISTORY: `${API_BASE_URL}/api/users/history`,
+  GET_USER_HISTORY: `${API_BASE_URL}/api/reviews/history`,
   UPGRADE_PLAN: `${API_BASE_URL}/api/users/upgrade`,
   
   // Health check
