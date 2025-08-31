@@ -32,29 +32,24 @@ function Profile({ user }) {
     setLoading(true);
     setError(null);
 
-    // use your new getReviewHistory function
-    const response = await apiCall(
-  `/api/test/user-data/${user.id}`,
-  'GET'
-);
+    const response = await apiCall('/api/users/history', 'GET');
 
     console.log("📡 Reviews response:", response);
-
-    if (response && Array.isArray(response)) {
-      const formattedReviews = response.map(review => ({
-  id: review.id,
-  language: review.language || "Unknown",
-  score: review.overall_score || 0,
-  date: new Date(review.created_at).toLocaleDateString(),
-  fullDate: review.created_at,
-  lines: review.lines || 0, // optional, if stored
-  title: review.title || `${review.language || "Code"} Review`,
-  fileName: review.file_name || "",
-  status: review.status || "completed",
-  issuesCount: review.issues_count || 0,
-  suggestionsCount: review.suggestions_count || 0,
-  tags: review.tags || []
-}));
+if (response && response.success && Array.isArray(response.reviews)) {
+  const formattedReviews = response.reviews.map(review => ({
+    id: review.id,
+    language: review.language || "Unknown",
+    score: review.overall_score || 0,
+    date: new Date(review.created_at).toLocaleDateString(),
+    fullDate: review.created_at,
+    lines: review.lines || 0,
+    title: review.title || review.file_name || `${review.language || "Code"} Review`,
+    fileName: review.file_name || "",
+    status: review.status || "completed",
+    issuesCount: review.issues_count || 0,
+    suggestionsCount: review.suggestions_count || 0,
+    tags: review.tags || []
+  }));
 
 
       setReviews(formattedReviews);
@@ -75,38 +70,33 @@ const fetchUserStatistics = async () => {
     console.log("📡 Fetching user stats + history from backend...");
 
     // ✅ Real API call
-    const response = await apiCall(`/api/test/user-data/${user.id}`, "GET");
+    const response = await apiCall('/api/users/dashboard', 'GET');
 
     if (response.success) {
-      const reviewData = response.reviews || [];
+  const reviewData = response.dashboard?.recentReviews || [];
+  const summary = response.dashboard?.summary || {};
 
-      // Calculate stats
-      const totalReviews = reviewData.length;
-      const averageScore =
-        reviewData.reduce((sum, r) => sum + (r.overall_score || 0), 0) /
-        (totalReviews || 1);
+  // Top languages (based on recent reviews)
+  const langCount = {};
+  reviewData.forEach((r) => {
+    if (r.language) {
+      langCount[r.language] = (langCount[r.language] || 0) + 1;
+    }
+  });
+  const topLanguages = Object.entries(langCount)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([language, count]) => ({ language, count }));
 
-      // Top languages (based on reviews)
-      const langCount = {};
-      reviewData.forEach((r) => {
-        if (r.language) {
-          langCount[r.language] = (langCount[r.language] || 0) + 1;
-        }
-      });
-      const topLanguages = Object.entries(langCount)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 5)
-        .map(([language, count]) => ({ language, count }));
-
-      setStatistics({
-        totalReviews,
-        averageScore,
-        topLanguages,
-        creditsRemaining:
-          (user.reviewsLimit || 100) - (user.reviewsUsed || totalReviews),
-        languagesReviewed: Object.keys(langCount).length,
-        languageDistribution: langCount,
-      });
+  setStatistics({
+    totalReviews: summary.totalReviews || reviewData.length,
+    averageScore: summary.averageScore || 0,
+    completedReviews: summary.totalReviews || reviewData.length,
+    topLanguages,
+    creditsRemaining: summary.creditsLimit - summary.creditsUsed || 0,
+    languagesReviewed: Object.keys(langCount).length,
+    languageDistribution: langCount,
+  });
 
       console.log("✅ Statistics updated:", { totalReviews, averageScore, topLanguages });
     } else {
