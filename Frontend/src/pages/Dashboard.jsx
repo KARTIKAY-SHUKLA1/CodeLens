@@ -18,6 +18,10 @@ function Dashboard({ onNavigate }) {
   const { isDark } = useTheme();
   // Get all auth functions
   const { user, updateReviewUsage, setUserData } = useAuth();
+
+// Debug logging - add this right after the line above
+console.log('DEBUG: setUserData exists?', typeof setUserData);
+console.log('DEBUG: user exists?', !!user);
   
   const theme = isDark ? 'dark' : 'light';
 
@@ -124,21 +128,25 @@ function Dashboard({ onNavigate }) {
         selectedLanguage: language,
         finalLanguage,
       });
+      // Debug and fix credit update
+console.log('DEBUG: About to update credits');
+console.log('DEBUG: result.creditsInfo exists?', !!result.creditsInfo);
+console.log('DEBUG: setUserData exists?', typeof setUserData);
 
-      // FIXED: Update user credits if analysis was successful and user state management is available
-      if (result.creditsInfo && setUserData && user) {
-        // Update the user's credit usage
-        const updatedUser = {
-          ...user,
-          reviewsUsed: result.creditsInfo.used,
-          reviewsLimit: result.creditsInfo.limit
-        };
-        setUserData(updatedUser);
-        console.log('Updated user credits:', result.creditsInfo);
-      } else if (updateReviewUsage && result.creditsInfo) {
-        // Alternative: use the specific update function
-        updateReviewUsage(result.creditsInfo);
-      }
+if (result.creditsInfo) {
+  if (setUserData && user) {
+    const updatedUser = {
+      ...user,
+      reviewsUsed: result.creditsInfo.used,
+      reviewsLimit: result.creditsInfo.limit
+    };
+    setUserData(updatedUser);
+    console.log('Updated user credits:', result.creditsInfo);
+  } else if (updateReviewUsage) {
+    updateReviewUsage(result.creditsInfo);
+    console.log('Updated via updateReviewUsage:', result.creditsInfo);
+  }
+}
 
     } catch (err) {
       console.error("Analysis error:", err);
