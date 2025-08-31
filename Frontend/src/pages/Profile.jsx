@@ -1,11 +1,11 @@
-import { API_ENDPOINTS, apiCall } from '../config/api';
 import React, { useState, useEffect } from 'react';
 import { User, Clock, Code, TrendingUp, Calendar, Star, RefreshCw, AlertCircle } from 'lucide-react';
 import { useTheme } from '../components/ThemeProvider';
 import { apiCall, API_ENDPOINTS } from '../config/api';
-
+import useAuth from '../hooks/useAuth';
 // Fixed Profile Component with Real Database Integration
-function Profile({ user }) {
+function Profile() {
+  const { user, setUserData } = useAuth();   // ✅ grab from hook
   const [activeTab, setActiveTab] = useState('overview');
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
