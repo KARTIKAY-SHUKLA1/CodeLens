@@ -199,13 +199,20 @@ function useAuth() {
 
   // Helper to manually set user data (for testing/debugging)
   const setUserData = (userData, token = null) => {
+    if (!userData) {
+      console.warn('setUserData called with null/undefined userData');
+      return;
+    }
+    
     setUser(userData);
     if (token) {
       localStorage.setItem('auth_token', token);
     }
     localStorage.setItem('user_data', JSON.stringify(userData));
+    console.log('User data set manually:', userData.id || 'no-id');
   };
 
+  // Return all functions and state - ensuring setUserData is included
   return { 
     user, 
     signIn, 
@@ -219,7 +226,7 @@ function useAuth() {
     refreshUser,
     isAuthenticated,
     getAuthToken,
-    setUserData
+    setUserData  // Make sure this is explicitly included
   };
 }
 

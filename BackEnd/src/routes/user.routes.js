@@ -28,8 +28,6 @@ const updateProfileSchema = Joi.object({
   blog: Joi.string().uri().max(255).optional().allow('')
 });
 
-// Replace the preferencesSchema in your user.routes.js file with this:
-
 const preferencesSchema = Joi.object({
   // Frontend sends 'favoriteLanguages' 
   favoriteLanguages: Joi.array().items(Joi.string()).optional(),
@@ -78,6 +76,7 @@ router.get('/profile', async (req, res) => {
       .single();
 
     if (error || !user) {
+      console.error('❌ User not found:', error);
       return res.status(404).json({
         success: false,
         message: 'User profile not found',
@@ -116,28 +115,42 @@ router.get('/profile', async (req, res) => {
       .slice(0, 5)
       .map(([lang, count]) => ({ language: lang, count }));
 
+    // CORRECTED: Ensure user object has all required fields and proper structure
+    const userResponse = {
+      id: user.id,
+      name: user.name || user.username || 'User',
+      email: user.email,
+      avatar: user.avatar_url,
+      githubUsername: user.username,
+      plan: user.plan || 'free',
+      reviewsUsed: user.credits_used || 0,
+      reviewsLimit: user.credits_limit || 100,
+      isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
+      preferences: userPrefs?.preferences || {},
+      // Add additional fields that might be expected by frontend
+      bio: user.bio || '',
+      location: user.location || '',
+      company: user.company || '',
+      githubProfileUrl: user.github_profile_url,
+      createdAt: user.created_at,
+      lastLogin: user.last_login
+    };
+
+    const statisticsResponse = {
+      totalReviews,
+      completedReviews,
+      averageScore: parseFloat(averageScore),
+      topLanguages,
+      creditsRemaining: (user.credits_limit || 100) - (user.credits_used || 0)
+    };
+
+    console.log('✅ Profile response prepared for user:', userResponse.id);
+
     // Final response
     res.json({
       success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar_url,
-        githubUsername: user.username,
-        plan: user.plan || 'free',
-        reviewsUsed: user.credits_used || 0,
-        reviewsLimit: user.credits_limit || 100,
-        isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
-        preferences: userPrefs?.preferences || {}
-      },
-      statistics: {
-        totalReviews,
-        completedReviews,
-        averageScore: parseFloat(averageScore),
-        topLanguages,
-        creditsRemaining: (user.credits_limit || 100) - (user.credits_used || 0)
-      }
+      user: userResponse,
+      statistics: statisticsResponse
     });
 
   } catch (error) {
@@ -150,7 +163,6 @@ router.get('/profile', async (req, res) => {
     });
   }
 });
-
 
 // @route   POST /api/users/preferences
 // @desc    Save user preferences (temporarily store in a separate table or JSON column)
@@ -185,7 +197,6 @@ router.post('/preferences', async (req, res) => {
     console.log('✅ Preferences validated, updating user...');
 
     // FIXED: Instead of updating preferences column, create/update in user_preferences table
-    // First, try to upsert in a preferences table (you'll need to create this)
     try {
       const { data: existingPref, error: selectError } = await supabase
         .from('user_preferences')
@@ -220,16 +231,18 @@ router.post('/preferences', async (req, res) => {
       }
 
       if (result.error) {
-        console.warn('⚠️ Could not save to user_preferences table, this is OK for now');
+        console.warn('⚠️ Could not save to user_preferences table:', result.error.message);
+      } else {
+        console.log('✅ Preferences saved to user_preferences table');
       }
     } catch (prefError) {
-      console.warn('⚠️ Preferences table may not exist yet, continuing...');
+      console.warn('⚠️ Preferences table operation failed:', prefError.message);
     }
 
-    // Get updated user data
+    // Get updated user data - CORRECTED to ensure proper structure
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .select('id, username, name, email, avatar_url, plan, credits_used, credits_limit')
+      .select('id, username, name, email, avatar_url, plan, credits_used, credits_limit, bio, location, company, github_profile_url')
       .eq('id', req.user.id)
       .single();
 
@@ -254,21 +267,28 @@ router.post('/preferences', async (req, res) => {
 
     console.log('✅ Preferences saved successfully for user:', updatedUser.id);
 
+    // CORRECTED: Ensure consistent user object structure
+    const userResponse = {
+      id: updatedUser.id,
+      name: updatedUser.name || updatedUser.username || 'User',
+      email: updatedUser.email,
+      avatar: updatedUser.avatar_url,
+      githubUsername: updatedUser.username,
+      plan: updatedUser.plan || 'free',
+      reviewsUsed: updatedUser.credits_used || 0,
+      reviewsLimit: updatedUser.credits_limit || 100,
+      isNewUser: false, // After preferences are set, user is no longer new
+      preferences: value, // Return the saved preferences
+      bio: updatedUser.bio || '',
+      location: updatedUser.location || '',
+      company: updatedUser.company || '',
+      githubProfileUrl: updatedUser.github_profile_url
+    };
+
     res.json({
       success: true,
       message: 'Preferences saved successfully',
-      user: {
-        id: updatedUser.id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        avatar: updatedUser.avatar_url,
-        githubUsername: updatedUser.username,
-        plan: updatedUser.plan || 'free',
-        reviewsUsed: updatedUser.credits_used || 0,
-        reviewsLimit: updatedUser.credits_limit || 100,
-        isNewUser: false,
-        preferences: value // Return the saved preferences
-      }
+      user: userResponse
     });
 
   } catch (error) {
@@ -318,7 +338,7 @@ router.put('/profile', async (req, res) => {
       .from('users')
       .update(updateData)
       .eq('id', req.user.id)
-      .select('id, username, name, email, avatar_url, bio, github_profile_url, plan')
+      .select('id, username, name, email, avatar_url, bio, location, company, github_profile_url, plan, credits_used, credits_limit')
       .single();
 
     if (error) {
@@ -333,10 +353,26 @@ router.put('/profile', async (req, res) => {
 
     console.log('✅ Profile updated successfully');
 
+    // CORRECTED: Return consistent user object structure
+    const userResponse = {
+      id: updatedUser.id,
+      name: updatedUser.name || updatedUser.username || 'User',
+      email: updatedUser.email,
+      avatar: updatedUser.avatar_url,
+      githubUsername: updatedUser.username,
+      plan: updatedUser.plan || 'free',
+      reviewsUsed: updatedUser.credits_used || 0,
+      reviewsLimit: updatedUser.credits_limit || 100,
+      bio: updatedUser.bio || '',
+      location: updatedUser.location || '',
+      company: updatedUser.company || '',
+      githubProfileUrl: updatedUser.github_profile_url
+    };
+
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      user: updatedUser
+      user: userResponse
     });
 
   } catch (error) {
@@ -350,11 +386,7 @@ router.put('/profile', async (req, res) => {
   }
 });
 
-// Rest of the routes remain the same...
 // @route   GET /api/users/dashboard
-// =========================
-// GET /api/users/dashboard
-// =========================
 router.get('/dashboard', async (req, res) => {
   try {
     if (!req.user?.id) {
@@ -408,7 +440,6 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
-
 // @route   GET /api/users/activity
 router.get('/activity', async (req, res) => {
   try {
@@ -441,6 +472,7 @@ router.get('/activity', async (req, res) => {
     });
   }
 });
+
 // Get logged-in user's review history
 router.get('/history', async (req, res) => {
   try {
@@ -491,9 +523,6 @@ router.get('/history', async (req, res) => {
   }
 });
 
-// =========================
-// GET /api/users/:id/history
-// =========================
 // Get public user profile history
 router.get('/:id/history', async (req, res) => {
   try {
@@ -509,7 +538,7 @@ router.get('/:id/history', async (req, res) => {
         language,
         title,
         file_name
-      `) // Removed repositories() to avoid FK issues
+      `)
       .eq('user_id', req.params.id)
       .order('created_at', { ascending: false })
       .limit(20);
@@ -529,6 +558,5 @@ router.get('/:id/history', async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;
