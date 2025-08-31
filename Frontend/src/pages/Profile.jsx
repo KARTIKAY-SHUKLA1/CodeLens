@@ -1,3 +1,4 @@
+import { API_ENDPOINTS, apiCall } from '../config/api';
 import React, { useState, useEffect } from 'react';
 import { User, Clock, Code, TrendingUp, Calendar, Star, RefreshCw, AlertCircle } from 'lucide-react';
 import { useTheme } from '../components/ThemeProvider';
@@ -32,7 +33,7 @@ function Profile({ user }) {
     setLoading(true);
     setError(null);
 
-    const response = await apiCall('/api/users/history', 'GET');
+    const response = await apiCall(API_ENDPOINTS.GET_USER_HISTORY, 'GET');
 
     console.log("📡 Reviews response:", response);
 if (response && response.success && Array.isArray(response.reviews)) {
@@ -70,7 +71,7 @@ const fetchUserStatistics = async () => {
     console.log("📡 Fetching user stats + history from backend...");
 
     // ✅ Real API call
-    const response = await apiCall('/api/users/dashboard', 'GET');
+    const response = await apiCall(API_ENDPOINTS.GET_DASHBOARD, 'GET');
 
     if (response.success) {
   const reviewData = response.dashboard?.recentReviews || [];
