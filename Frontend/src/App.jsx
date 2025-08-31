@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // Import all the components
 import { ThemeProvider } from './components/ThemeProvider';
-import useAuth from './hooks/useAuth';
+import useAuth from '../hooks/useAuth';
 import WelcomeModal from './components/WelcomeModal';
 import { Navigation, HomeNavigation } from './components/Navigation';
 import { Footer, SimpleFooter } from './components/Footer';
