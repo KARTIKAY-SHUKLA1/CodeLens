@@ -9,7 +9,7 @@ function AuthCallback() {
   // CORRECTED: Destructure directly from useAuth() call
   // Safe destructuring to prevent errors
 const authHook = useAuth();
-const { handleAuthCallback, setUserData } = authHook || {};
+const { handleAuthCallback, setUserData } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
