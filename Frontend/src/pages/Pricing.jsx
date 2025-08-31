@@ -18,8 +18,8 @@ function Pricing({ user, onNavigate }) {
 
   const fetchSubscriptionStatus = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/payments/subscription-status', {
+      const token =localStorage.getItem('auth_token');
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/payments/subscription-status`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -50,7 +50,7 @@ function Pricing({ user, onNavigate }) {
     setError('');
 
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('auth_token');
       const response = await fetch('/api/payments/create-checkout-session', {
         method: 'POST',
         headers: {
@@ -87,7 +87,7 @@ function Pricing({ user, onNavigate }) {
     setError('');
 
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('auth_token');
       const response = await fetch('/api/payments/billing-portal', {
         headers: {
           'Authorization': `Bearer ${token}`,

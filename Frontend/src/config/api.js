@@ -41,6 +41,12 @@ export const API_ENDPOINTS = {
   GET_ACTIVITY: `${API_BASE_URL}/api/users/activity`,
   GET_USER_HISTORY: `${API_BASE_URL}/api/reviews/history`,
   UPGRADE_PLAN: `${API_BASE_URL}/api/users/upgrade`,
+
+  
+  // Payment endpoints
+  CREATE_CHECKOUT_SESSION: `${API_BASE_URL}/api/payments/create-checkout-session`,
+  SUBSCRIPTION_STATUS: `${API_BASE_URL}/api/payments/subscription-status`,
+  BILLING_PORTAL: `${API_BASE_URL}/api/payments/billing-portal`,
   
   // Health check
   HEALTH: `${API_BASE_URL}/health`
