@@ -39,6 +39,7 @@ export const API_ENDPOINTS = {
   UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
   GET_DASHBOARD: `${API_BASE_URL}/api/users/dashboard`,
   GET_ACTIVITY: `${API_BASE_URL}/api/users/activity`,
+  GET_USER_HISTORY: `${API_BASE_URL}/api/users/history`,
   UPGRADE_PLAN: `${API_BASE_URL}/api/users/upgrade`,
   
   // Health check
@@ -332,6 +333,11 @@ export const getUserDashboard = async () => {
 
 export const getUserActivity = async (page = 1, limit = 20) => {
   return await apiCall(`${API_ENDPOINTS.GET_ACTIVITY}?page=${page}&limit=${limit}`);
+};
+
+
+export const getUserHistory = async (page = 1, limit = 20) => {
+  return await apiCall(`${API_ENDPOINTS.GET_USER_HISTORY}?page=${page}&limit=${limit}`);
 };
 
 // Other API functions
