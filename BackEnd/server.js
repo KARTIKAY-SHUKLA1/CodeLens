@@ -10,7 +10,18 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-const app = require('./src/app');
+// Import the Express app
+const app = require('./app'); // Your existing app.js
+
+// Import passport and configure it
+const passport = require('passport');
+
+// CRITICAL FIX: Initialize Passport properly
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Configure Passport strategies - CRITICAL FIX
+require('./src/config/passport')(passport);
 
 // Ensure PORT is a valid number
 const PORT = (() => {
@@ -27,17 +38,18 @@ const server = app.listen(PORT, () => {
   console.log(`✅ Server is running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   
-  // Log important config for debugging (only in development)
-  if (process.env.NODE_ENV === 'development') {
-    console.log('\n📋 Configuration loaded:');
-    console.log(`- CORS Origin: ${process.env.CORS_ORIGIN || 'Not set'}`);
-    console.log(`- Supabase URL: ${process.env.SUPABASE_URL ? '✓ Connected' : '❌ Not configured'}`);
-    console.log(`- Supabase Service Key: ${process.env.SUPABASE_SERVICE_KEY ? '✓ Loaded' : '❌ Missing'}`);
-    console.log(`- JWT Secret: ${process.env.JWT_SECRET ? '✓ Loaded' : '❌ Missing'}`);
-    console.log(`- Google Gemini Key: ${process.env.GOOGLE_GEMINI_KEY ? '✓ Loaded' : '❌ Missing'}`);
-    console.log(`- GitHub Client ID: ${process.env.GITHUB_CLIENT_ID ? '✓ Configured' : '❌ Missing'}`);
-    console.log(`- GitHub Client Secret: ${process.env.GITHUB_CLIENT_SECRET ? '✓ Configured' : '❌ Missing'}`);
-    console.log('\n🚀 Server ready for requests...\n');
+  // Check critical environment variables
+  console.log('📋 Configuration Status:');
+  console.log(`- JWT_SECRET: ${process.env.JWT_SECRET ? '✅ Configured' : '❌ Missing'}`);
+  console.log(`- SUPABASE_URL: ${process.env.SUPABASE_URL ? '✅ Connected' : '❌ Not configured'}`);
+  console.log(`- SUPABASE_SERVICE_KEY: ${process.env.SUPABASE_SERVICE_KEY ? '✅ Loaded' : '❌ Missing'}`);
+  console.log(`- GOOGLE_GEMINI_KEY: ${process.env.GOOGLE_GEMINI_KEY ? '✅ Loaded' : '❌ Missing'}`);
+  console.log(`- GitHub OAuth: ${process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET ? '✅ Configured' : '⚠️ Missing'}`);
+  
+  if (process.env.NODE_ENV === 'production') {
+    console.log('🚀 Production server ready');
+  } else {
+    console.log('🛠️ Development server ready');
   }
 });
 
@@ -62,7 +74,6 @@ const gracefulShutdown = (signal) => {
     }
     
     console.log('✅ Server closed successfully');
-    console.log('🔌 All connections closed');
     process.exit(0);
   });
   
@@ -80,15 +91,10 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('unhandledRejection', (reason, promise) => {
   console.error('🚨 Unhandled Rejection at:', promise);
   console.error('🚨 Reason:', reason);
-  // Don't exit the process in production
-  if (process.env.NODE_ENV !== 'production') {
-    process.exit(1);
-  }
 });
 
 process.on('uncaughtException', (error) => {
   console.error('🚨 Uncaught Exception:', error);
-  console.error('🚨 Stack:', error.stack);
   gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 

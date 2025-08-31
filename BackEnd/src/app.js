@@ -3,17 +3,20 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
-
 );
+
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const session = require('express-session');
+const passport = require('passport'); // ADD: Import passport
 
 const app = express();
-// Add this to your main server.js or app.js file
+
+// ADD: Configure Passport strategies BEFORE using passport middleware
+require('./src/config/passport')(passport);
 
 // Test database connection endpoint
 app.get('/api/test/db', async (req, res) => {
@@ -64,63 +67,9 @@ app.get('/api/test/db', async (req, res) => {
   }
 });
 
-// Test specific user data endpoint
-app.get('/api/test/user-data/:userId', async (req, res) => {
-  try {
-    console.log('=== Testing User Data ===');
-    console.log('User ID:', req.params.userId);
-    
-    // Get user profile
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', req.params.userId)
-      .single();
-    
-    if (userError) {
-      throw new Error(`User query error: ${userError.message}`);
-    }
-
-    // Get user's reviews
-    const { data: reviews, error: reviewsError } = await supabase
-      .from('code_reviews')
-      .select('id, title, language, created_at, status, overall_score')
-      .eq('user_id', req.params.userId)
-      .order('created_at', { ascending: false });
-    
-    if (reviewsError) {
-      throw new Error(`Reviews query error: ${reviewsError.message}`);
-    }
-
-    console.log(`✅ Found user with ${reviews?.length || 0} reviews`);
-    
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        reviewCount: reviews?.length || 0
-      },
-      reviews: reviews?.map(r => ({
-        id: r.id,
-        title: r.title,
-        language: r.language,
-        status: r.status,
-        score: r.overall_score,
-        date: r.created_at
-      })) || []
-    });
-    
-  } catch (error) {
-    console.error('❌ User data test failed:', error);
-    res.status(500).json({
-      success: false,
-      message: 'User data test failed',
-      error: error.message
-    });
-  }
-});
+// Test specific user data endpoint - REMOVE this since it's causing 404
+// app.get('/api/test/user-data/:userId', async (req, res) => { ... });
+// COMMENT OUT OR DELETE THIS ENTIRE ENDPOINT
 
 // Trust proxy for Render deployment
 app.set('trust proxy', 1);
@@ -133,10 +82,10 @@ app.use(helmet({
 // CORS Configuration
 const corsOptions = {
   origin: [
-  'http://localhost:3000',
-  'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app',
-  process.env.CORS_ORIGIN
-].filter(Boolean),
+    'http://localhost:3000',
+    'https://code-lens-git-main-kartikay-shuklas-projects.vercel.app',
+    process.env.CORS_ORIGIN
+  ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
@@ -144,10 +93,10 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Rate Limiting with proper proxy trust
+// Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 100,
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.',
@@ -155,9 +104,7 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // Skip rate limiting if X-Forwarded-For header validation fails
   skip: (req) => {
-    // Skip rate limiting for health checks
     if (req.path === '/health') return true;
     return false;
   }
@@ -171,12 +118,16 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     maxAge: 1000 * 60 * 10 // 10 minutes for OAuth flow
   },
   name: 'codelens.sid'
 }));
+
+// ADD: Initialize Passport middleware AFTER session
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -209,22 +160,23 @@ app.get('/', (req, res) => {
       auth: '/api/auth/*',
       users: '/api/users/*',
       ai: '/api/ai/*',
+      reviews: '/api/reviews/*', // ADD: reviews endpoint
       health: '/health'
     }
   });
 });
 
 // Import routes
-const authRoutes = require('./routes/auth.routes');
-const userRoutes = require('./routes/user.routes');
-const aiRoutes = require('./routes/ai.routes');
-const reviewRoutes = require('./routes/review.routes');
+const authRoutes = require('./src/routes/auth.routes');
+const userRoutes = require('./src/routes/user.routes');
+const aiRoutes = require('./src/routes/ai.routes');
+const reviewRoutes = require('./src/routes/review.routes');
 
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
-app.use('/api/reviews', reviewRoutes);
+app.use('/api/reviews', reviewRoutes); // This handles /api/reviews/history
 
 // Catch-all for undefined routes
 app.use('*', (req, res) => {
@@ -238,14 +190,25 @@ app.use('*', (req, res) => {
       '/api/auth/*',
       '/api/users/*', 
       '/api/ai/*',
+      '/api/reviews/*', // ADD: reviews endpoint
       '/health'
     ]
   });
 });
 
-// Global error handler
+// UPDATED: Global error handler with passport error handling
 app.use((error, req, res, next) => {
   console.error('Global error handler:', error);
+
+  // Handle passport JWT errors specifically
+  if (error.message && error.message.includes('Unknown authentication strategy "jwt"')) {
+    console.error('❌ JWT Strategy not configured properly');
+    return res.status(500).json({
+      success: false,
+      message: 'Authentication configuration error',
+      error: 'AUTH_CONFIG_ERROR'
+    });
+  }
 
   // Handle specific error types
   if (error.name === 'ValidationError') {
@@ -276,7 +239,7 @@ app.use((error, req, res, next) => {
   // Handle rate limit errors
   if (error.code === 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR') {
     console.warn('Rate limiter proxy warning:', error.message);
-    return next(); // Continue without rate limiting
+    return next();
   }
 
   // Default error response
