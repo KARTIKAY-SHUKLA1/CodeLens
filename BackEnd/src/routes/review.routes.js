@@ -86,7 +86,9 @@ router.get('/history', async (req, res) => {
   try {
     console.log('=== GET Review History Endpoint ===');
     console.log('Fetching history for user:', req.user.id);
-
+    console.log('SUPABASE_URL exists:', !!process.env.SUPABASE_URL);
+    console.log('SUPABASE_SERVICE_KEY exists:', !!process.env.SUPABASE_SERVICE_KEY);
+    console.log('Supabase client initialized:', !!supabase);
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Max 100
     const offset = (page - 1) * limit;
