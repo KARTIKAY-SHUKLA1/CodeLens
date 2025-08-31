@@ -7,7 +7,9 @@ function AuthCallback() {
   const [error, setError] = useState(null);
   
   // CORRECTED: Destructure directly from useAuth() call
-  const { handleAuthCallback, setUserData } = useAuth();
+  // Safe destructuring to prevent errors
+const authHook = useAuth();
+const { handleAuthCallback, setUserData } = authHook || {};
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -52,7 +54,6 @@ function AuthCallback() {
             localStorage.setItem('auth_token', token);
             localStorage.setItem('user_data', JSON.stringify(userData));
             
-            // CORRECTED: setUserData should now be available
             if (setUserData && typeof setUserData === 'function') {
               setUserData(userData, token);
               console.log('User data set via setUserData');

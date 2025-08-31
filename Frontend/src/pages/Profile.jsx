@@ -32,7 +32,11 @@ function Profile({ user }) {
     setLoading(true);
     setError(null);
 
-  const response = await apiCall(`${API_BASE_URL}/api/reviews/history?page=1&limit=50`);
+    // use your new getReviewHistory function
+    const response = await apiCall(
+  `/api/test/user-data/${user.id}`,
+  'GET'
+);
 
     console.log("📡 Reviews response:", response);
 

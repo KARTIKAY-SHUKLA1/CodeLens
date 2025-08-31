@@ -16,9 +16,9 @@ function Dashboard({ onNavigate, user }) {
 
   // Get theme using the hook
   const { isDark } = useTheme();
-  
-  // FIXED: Import setUserData from useAuth hook
-  const { setUserData, updateReviewUsage } = useAuth();
+  // Get all auth functions
+const authHook = useAuth();
+const { setUserData, updateReviewUsage } = authHook;
   
   const theme = isDark ? 'dark' : 'light';
 

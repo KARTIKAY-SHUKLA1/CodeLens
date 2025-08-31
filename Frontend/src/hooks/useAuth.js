@@ -211,8 +211,6 @@ function useAuth() {
     localStorage.setItem('user_data', JSON.stringify(userData));
     console.log('User data set manually:', userData.id || 'no-id');
   };
-
-  // Return all functions and state - ensuring setUserData is included
   return { 
     user, 
     signIn, 
