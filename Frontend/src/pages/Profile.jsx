@@ -98,7 +98,11 @@ const fetchUserStatistics = async () => {
     languageDistribution: langCount,
   });
 
-      console.log("✅ Statistics updated:", { totalReviews, averageScore, topLanguages });
+    console.log("✅ Statistics updated:", {
+  totalReviews: summary.totalReviews,
+  averageScore: summary.averageScore,
+  topLanguages
+});
     } else {
       console.error("❌ Failed to fetch stats:", response.message);
     }

@@ -5,7 +5,7 @@ import { languageDetector } from '../utils/languageDetector';
 import { useTheme } from '../components/ThemeProvider';
 import useAuth from '../hooks/useAuth';
 
-function Dashboard({ onNavigate, user }) {
+function Dashboard({ onNavigate }) {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('javascript');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -17,8 +17,8 @@ function Dashboard({ onNavigate, user }) {
   // Get theme using the hook
   const { isDark } = useTheme();
   // Get all auth functions
-const authHook = useAuth();
-const { setUserData, updateReviewUsage } = authHook;
+  const { user, setUserData, updateReviewUsage } = useAuth();
+
   
   const theme = isDark ? 'dark' : 'light';
 

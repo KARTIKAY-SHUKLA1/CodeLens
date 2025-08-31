@@ -82,7 +82,7 @@ export default function CodeLensApp() {
       case 'home':
         return <LandingPage onNavigate={handleNavigate} user={user} signIn={signIn} isLoading={isLoading} />;
       case 'dashboard':
-        return <Dashboard onNavigate={handleNavigate} user={user} />;
+        return <Dashboard onNavigate={handleNavigate}/>;
       case 'profile':
         return <Profile user={user} />;
       case 'pricing':
