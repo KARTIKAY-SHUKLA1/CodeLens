@@ -64,12 +64,13 @@ router.get('/profile', async (req, res) => {
       });
     }
 
-    // Get user info
+    // FIXED: Updated to use new subscription columns instead of 'plan'
     const { data: user, error } = await supabase
       .from('users')
       .select(`
         id, username, name, email, avatar_url, bio, 
-        github_profile_url, plan, credits_used, credits_limit,
+        github_profile_url, subscription_tier, subscription_status, 
+        stripe_customer_id, credits_used, credits_limit,
         created_at, last_login
       `)
       .eq('id', req.user.id)
@@ -115,19 +116,20 @@ router.get('/profile', async (req, res) => {
       .slice(0, 5)
       .map(([lang, count]) => ({ language: lang, count }));
 
-    // CORRECTED: Ensure user object has all required fields and proper structure
+    // FIXED: Updated to use new subscription columns
     const userResponse = {
       id: user.id,
       name: user.name || user.username || 'User',
       email: user.email,
       avatar: user.avatar_url,
       githubUsername: user.username,
-      plan: user.plan || 'free',
+      plan: user.subscription_tier || 'free', // Frontend still expects 'plan'
+      subscriptionStatus: user.subscription_status || 'inactive',
+      stripeCustomerId: user.stripe_customer_id,
       reviewsUsed: user.credits_used || 0,
       reviewsLimit: user.credits_limit || 100,
       isNewUser: user.created_at && new Date(user.created_at) > new Date(Date.now() - 24*60*60*1000),
       preferences: userPrefs?.preferences || {},
-      // Add additional fields that might be expected by frontend
       bio: user.bio || '',
       location: user.location || '',
       company: user.company || '',
@@ -239,10 +241,14 @@ router.post('/preferences', async (req, res) => {
       console.warn('⚠️ Preferences table operation failed:', prefError.message);
     }
 
-    // Get updated user data - CORRECTED to ensure proper structure
+    // FIXED: Updated to use new subscription columns
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .select('id, username, name, email, avatar_url, plan, credits_used, credits_limit, bio, location, company, github_profile_url')
+      .select(`
+        id, username, name, email, avatar_url, subscription_tier, 
+        subscription_status, stripe_customer_id, credits_used, 
+        credits_limit, bio, location, company, github_profile_url
+      `)
       .eq('id', req.user.id)
       .single();
 
@@ -267,14 +273,16 @@ router.post('/preferences', async (req, res) => {
 
     console.log('✅ Preferences saved successfully for user:', updatedUser.id);
 
-    // CORRECTED: Ensure consistent user object structure
+    // FIXED: Updated to use new subscription columns
     const userResponse = {
       id: updatedUser.id,
       name: updatedUser.name || updatedUser.username || 'User',
       email: updatedUser.email,
       avatar: updatedUser.avatar_url,
       githubUsername: updatedUser.username,
-      plan: updatedUser.plan || 'free',
+      plan: updatedUser.subscription_tier || 'free', // Frontend still expects 'plan'
+      subscriptionStatus: updatedUser.subscription_status || 'inactive',
+      stripeCustomerId: updatedUser.stripe_customer_id,
       reviewsUsed: updatedUser.credits_used || 0,
       reviewsLimit: updatedUser.credits_limit || 100,
       isNewUser: false, // After preferences are set, user is no longer new
@@ -334,11 +342,16 @@ router.put('/profile', async (req, res) => {
       updated_at: new Date().toISOString()
     };
 
+    // FIXED: Updated to use new subscription columns
     const { data: updatedUser, error } = await supabase
       .from('users')
       .update(updateData)
       .eq('id', req.user.id)
-      .select('id, username, name, email, avatar_url, bio, location, company, github_profile_url, plan, credits_used, credits_limit')
+      .select(`
+        id, username, name, email, avatar_url, bio, location, 
+        company, github_profile_url, subscription_tier, 
+        subscription_status, stripe_customer_id, credits_used, credits_limit
+      `)
       .single();
 
     if (error) {
@@ -353,14 +366,16 @@ router.put('/profile', async (req, res) => {
 
     console.log('✅ Profile updated successfully');
 
-    // CORRECTED: Return consistent user object structure
+    // FIXED: Updated to use new subscription columns
     const userResponse = {
       id: updatedUser.id,
       name: updatedUser.name || updatedUser.username || 'User',
       email: updatedUser.email,
       avatar: updatedUser.avatar_url,
       githubUsername: updatedUser.username,
-      plan: updatedUser.plan || 'free',
+      plan: updatedUser.subscription_tier || 'free', // Frontend still expects 'plan'
+      subscriptionStatus: updatedUser.subscription_status || 'inactive',
+      stripeCustomerId: updatedUser.stripe_customer_id,
       reviewsUsed: updatedUser.credits_used || 0,
       reviewsLimit: updatedUser.credits_limit || 100,
       bio: updatedUser.bio || '',
@@ -404,10 +419,10 @@ router.get('/dashboard', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(5);
 
-    // Get user info for credits
+    // FIXED: Updated to use new subscription columns
     const { data: user } = await supabase
       .from('users')
-      .select('credits_used, credits_limit')
+      .select('credits_used, credits_limit, subscription_tier, subscription_status')
       .eq('id', req.user.id)
       .single();
 
@@ -425,7 +440,9 @@ router.get('/dashboard', async (req, res) => {
           totalReviews: recentReviews?.length || 0,
           averageScore: parseFloat(averageScore),
           creditsUsed: user?.credits_used || 0,
-          creditsLimit: user?.credits_limit || 100
+          creditsLimit: user?.credits_limit || 100,
+          subscriptionTier: user?.subscription_tier || 'free',
+          subscriptionStatus: user?.subscription_status || 'inactive'
         }
       }
     });
