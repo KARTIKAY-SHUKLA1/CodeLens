@@ -228,7 +228,8 @@ router.get('/github/callback', async (req, res) => {
           email: primaryEmail,
           avatar_url: userData.avatar_url,
           github_profile_url: userData.html_url,
-          plan: 'free',
+          subscription_tier: 'free',     // ✅ Use new column
+    subscription_status: 'inactive', // ✅ Use new column
           credits_used: 0,
           credits_limit: 100,
           created_at: new Date().toISOString(),
@@ -273,7 +274,7 @@ router.get('/github/callback', async (req, res) => {
       email: user.email,
       avatar: user.avatar_url,
       githubUsername: user.username,
-      plan: user.plan || 'free',
+      plan: user.subscription_tier || 'free',
       reviewsUsed: user.credits_used || 0,
       reviewsLimit: user.credits_limit || 100,
       isNewUser: isNewUser
@@ -414,7 +415,8 @@ router.post('/github/callback', async (req, res) => {
           email: primaryEmail,
           avatar_url: userData.avatar_url,
           github_profile_url: userData.html_url,
-          plan: 'free',
+          subscription_tier: 'free',
+subscription_status: 'inactive',
           credits_used: 0,
           credits_limit: 100,
           created_at: new Date().toISOString(),
@@ -449,7 +451,7 @@ router.post('/github/callback', async (req, res) => {
         email: user.email,
         avatar: user.avatar_url,
         githubUsername: user.username,
-        plan: user.plan || 'free',
+        plan: user.subscription_tier || 'free',
         reviewsUsed: user.credits_used || 0,
         reviewsLimit: user.credits_limit || 100,
         isNewUser: isNewUser
@@ -508,7 +510,7 @@ router.post('/verify-token', async (req, res) => {
         email: user.email,
         avatar: user.avatar_url,
         githubUsername: user.username,
-        plan: user.plan || 'free',
+        plan: user.subscription_tier || 'free',
         reviewsUsed: user.credits_used || 0,
         reviewsLimit: user.credits_limit || 100,
         isNewUser: false
