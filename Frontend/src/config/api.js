@@ -419,6 +419,20 @@ export const cancelSubscription = async () => {
     method: 'POST',
   });
 };
+export const createCheckoutSession = async (checkoutData) => {
+  return await apiCall(API_ENDPOINTS.CREATE_CHECKOUT_SESSION, {
+    method: 'POST',
+    body: JSON.stringify(checkoutData),
+  });
+};
+
+export const getSubscriptionStatus = async () => {
+  return await apiCall(API_ENDPOINTS.SUBSCRIPTION_STATUS);
+};
+
+export const getBillingPortal = async () => {
+  return await apiCall(API_ENDPOINTS.BILLING_PORTAL);
+};
 // Export token management functions
 export { getAuthToken, setAuthToken, clearAuthToken };
 export { API_BASE_URL };

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Loader2, CreditCard, AlertCircle } from 'lucide-react';
 import { useTheme } from '../components/ThemeProvider';
-import { getSubscriptionStatus, createCheckoutSession, getBillingPortal, cancelSubscription } from '../utils/api';
+import { getSubscriptionStatus, createCheckoutSession, getBillingPortal, cancelSubscription } from '../config/api';
 
 // Enhanced Pricing Component with Stripe Integration
 function Pricing({ user, onNavigate }) {

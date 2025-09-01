@@ -255,7 +255,7 @@ const authRoutes = require('./src/routes/auth.routes');
 const userRoutes = require('./src/routes/user.routes');
 const aiRoutes = require('./src/routes/ai.routes');
 const reviewRoutes = require('./src/routes/review.routes');
-const paymentRoutes = require('./src/routes/payment.routes'); // NEW: Payment routes
+const paymentRoutes = require('./src/routes/payments.routes'); // NEW: Payment routes
 
 // API Routes - CRITICAL: This handles all your endpoints
 app.use('/api/auth', authRoutes);
