@@ -2,7 +2,7 @@
 // API Configuration for Frontend
 
 // Use production URL
-const API_BASE_URL = 'https://codelens-backend-0xl0.onrender.com';
+const API_BASE_URL = 'https://codelens-backend-0xl0.onrender.com/api';
 
 console.log('API Base URL:', API_BASE_URL);
 
