@@ -21,7 +21,7 @@ const supabase = createClient(
 // Apply authentication middleware to all routes
 router.use(authenticateToken);
 
-// @route   POST /api/payments/create-checkout-session
+// @route   POST /api/payment/create-checkout-session
 // @desc    Create Stripe checkout session
 // @access  Private
 router.post('/create-checkout-session', async (req, res) => {
@@ -230,7 +230,7 @@ router.get('/subscription-status', async (req, res) => {
     });
   }
 });
-// @route   GET /api/payments/billing-portal
+// @route   GET /api/payment/billing-portal
 // @desc    Create Stripe billing portal session
 // @access  Private
 router.get('/billing-portal', async (req, res) => {
@@ -285,7 +285,7 @@ router.get('/billing-portal', async (req, res) => {
   }
 });
 
-// @route   POST /api/payments/cancel-subscription
+// @route   POST /api/payment/cancel-subscription
 // @desc    Cancel user's subscription
 // @access  Private
 router.post('/cancel-subscription', async (req, res) => {

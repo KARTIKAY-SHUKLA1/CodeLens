@@ -244,7 +244,7 @@ app.get('/', (req, res) => {
       users: '/api/users/*',
       ai: '/api/ai/*',
       reviews: '/api/reviews/*',
-      payments: '/api/payments/*',  // NEW: Payment endpoints
+      payment: '/api/payment/*',  // NEW: Payment endpoints
       health: '/health'
     }
   });
@@ -255,14 +255,14 @@ const authRoutes = require('./src/routes/auth.routes');
 const userRoutes = require('./src/routes/user.routes');
 const aiRoutes = require('./src/routes/ai.routes');
 const reviewRoutes = require('./src/routes/review.routes');
-const paymentRoutes = require('./src/routes/payments.routes'); // NEW: Payment routes
+const paymentRoutes = require('./src/routes/payment.routes'); // NEW: Payment routes
 
 // API Routes - CRITICAL: This handles all your endpoints
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/reviews', reviewRoutes);
-app.use('/api/payments', paymentRoutes); // NEW: Payment routes
+app.use('/api/payment', paymentRoutes); // NEW: Payment routes
 
 // Catch-all for undefined routes
 app.use('*', (req, res) => {
@@ -277,7 +277,7 @@ app.use('*', (req, res) => {
       '/api/users/*', 
       '/api/ai/*',
       '/api/reviews/*',
-      '/api/payments/*', // NEW
+      '/api/payment/*', // NEW
       '/health'
     ]
   });

@@ -43,10 +43,10 @@ export const API_ENDPOINTS = {
   UPGRADE_PLAN: `${API_BASE_URL}/api/users/upgrade`,
   
   // Payment endpoints
-  CREATE_CHECKOUT_SESSION: `${API_BASE_URL}/api/payments/create-checkout-session`,
-  SUBSCRIPTION_STATUS: `${API_BASE_URL}/api/payments/subscription-status`,
-  BILLING_PORTAL: `${API_BASE_URL}/api/payments/billing-portal`,
-  CANCEL_SUBSCRIPTION: `${API_BASE_URL}/api/payments/cancel-subscription`,
+  CREATE_CHECKOUT_SESSION: `${API_BASE_URL}/api/payment/create-checkout-session`,
+  SUBSCRIPTION_STATUS: `${API_BASE_URL}/api/payment/subscription-status`,
+  BILLING_PORTAL: `${API_BASE_URL}/api/payment/billing-portal`,
+  CANCEL_SUBSCRIPTION: `${API_BASE_URL}/api/payment/cancel-subscription`,
   // Health check
   HEALTH: `${API_BASE_URL}/health`
 };
