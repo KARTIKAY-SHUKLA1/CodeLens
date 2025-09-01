@@ -171,6 +171,7 @@ const authRoutes = require('./src/routes/auth.routes');
 const userRoutes = require('./src/routes/user.routes');
 const aiRoutes = require('./src/routes/ai.routes');
 const reviewRoutes = require('./src/routes/review.routes');
+const paymentRoutes = require('./src/routes/payment.routes');
 
 // API Routes
 app.use('/api/auth', authRoutes);

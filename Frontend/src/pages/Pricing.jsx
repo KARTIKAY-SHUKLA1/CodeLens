@@ -50,19 +50,20 @@ function Pricing({ user, onNavigate }) {
     setError('');
 
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch('/api/payments/create-checkout-session', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          planType: 'pro',
-          successUrl: `${window.location.origin}/dashboard?upgraded=true`,
-          cancelUrl: `${window.location.origin}/pricing?canceled=true`
-        })
-      });
+    const token = localStorage.getItem('auth_token');
+    // FIX: Use the correct backend URL instead of relative path
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/payments/create-checkout-session`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        planType: 'pro',
+        successUrl: `${window.location.origin}/dashboard?upgraded=true`,
+        cancelUrl: `${window.location.origin}/pricing?canceled=true`
+      })
+    });
 
       const data = await response.json();
 
@@ -87,13 +88,14 @@ function Pricing({ user, onNavigate }) {
     setError('');
 
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch('/api/payments/billing-portal', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+    const token = localStorage.getItem('auth_token');
+    // FIX: Use the correct backend URL instead of relative path
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/payments/billing-portal`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
 
       const data = await response.json();
 
