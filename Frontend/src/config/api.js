@@ -46,7 +46,7 @@ export const API_ENDPOINTS = {
   CREATE_CHECKOUT_SESSION: `${API_BASE_URL}/api/payments/create-checkout-session`,
   SUBSCRIPTION_STATUS: `${API_BASE_URL}/api/payments/subscription-status`,
   BILLING_PORTAL: `${API_BASE_URL}/api/payments/billing-portal`,
-  
+  CANCEL_SUBSCRIPTION: `${API_BASE_URL}/api/payments/cancel-subscription`,
   // Health check
   HEALTH: `${API_BASE_URL}/health`
 };
@@ -414,7 +414,11 @@ export const checkHealth = async () => {
     throw error;
   }
 };
-
+export const cancelSubscription = async () => {
+  return await apiCall(API_ENDPOINTS.CANCEL_SUBSCRIPTION, {
+    method: 'POST',
+  });
+};
 // Export token management functions
 export { getAuthToken, setAuthToken, clearAuthToken };
 export { API_BASE_URL };

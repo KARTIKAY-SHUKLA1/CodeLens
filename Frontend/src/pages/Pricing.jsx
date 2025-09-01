@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Loader2, CreditCard, AlertCircle } from 'lucide-react';
 import { useTheme } from '../components/ThemeProvider';
+import { getSubscriptionStatus, createCheckoutSession, getBillingPortal, cancelSubscription } from '../utils/api';
 
 // Enhanced Pricing Component with Stripe Integration
 function Pricing({ user, onNavigate }) {
@@ -17,102 +18,75 @@ function Pricing({ user, onNavigate }) {
   }, [user]);
 
   const fetchSubscriptionStatus = async () => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      // FIXED: Always use backend API URL
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/payments/subscription-status`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSubscriptionStatus(data.subscription);
-      }
-    } catch (error) {
-      console.error('Error fetching subscription status:', error);
+  try {
+    const data = await getSubscriptionStatus(); // ✅ uses api.js helper
+    if (data.success) {
+      setSubscriptionStatus(data.subscription);
+    } else {
+      setSubscriptionStatus(null);
     }
-  };
+  } catch (error) {
+    console.error("Error fetching subscription status:", error);
+    setSubscriptionStatus(null);
+  }
+};
 
-  const handleUpgradeToPro = async () => {
-    if (!user) {
-      // Redirect to login if not authenticated
-      onNavigate && onNavigate('home');
-      return;
+const handleUpgradeToPro = async () => {
+  if (!user) {
+    onNavigate && onNavigate('home');
+    return;
+  }
+
+  if (user.plan === 'pro' || (subscriptionStatus && subscriptionStatus.status === 'active')) {
+    return;
+  }
+
+  setIsLoading(true);
+  setError('');
+
+  try {
+    const data = await createCheckoutSession({
+      planType: 'pro',
+      successUrl: `${window.location.origin}/dashboard?upgraded=true`,
+      cancelUrl: `${window.location.origin}/pricing?canceled=true`
+    });
+
+    if (data.success && data.sessionUrl) {
+      window.location.href = data.sessionUrl; // ✅ Stripe redirect
+    } else {
+      throw new Error(data.message || 'Failed to create checkout session');
     }
+  } catch (error) {
+    console.error('Checkout error:', error);
+    setError(error.message || 'Failed to start checkout process');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
-    if (user.plan === 'pro' || (subscriptionStatus && subscriptionStatus.status === 'active')) {
-      return; // Already on Pro plan
-    }
-
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const token = localStorage.getItem('auth_token');
-      // FIXED: Always use backend API URL
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/payments/create-checkout-session`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          planType: 'pro',
-          successUrl: `${window.location.origin}/dashboard?upgraded=true`,
-          cancelUrl: `${window.location.origin}/pricing?canceled=true`
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.sessionUrl) {
-        // Redirect to Stripe Checkout
-        window.location.href = data.sessionUrl;
-      } else {
-        throw new Error(data.message || 'Failed to create checkout session');
-      }
-    } catch (error) {
-      console.error('Checkout error:', error);
-      setError(error.message || 'Failed to start checkout process');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleManageBilling = async () => {
-    if (!user) return;
+  if (!user) return;
 
-    setIsLoading(true);
-    setError('');
+  setIsLoading(true);
+  setError('');
 
-    try {
-      const token = localStorage.getItem('auth_token');
-      // FIXED: Always use backend API URL
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/payments/billing-portal`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+  try {
+    const data = await openBillingPortal();
 
-      const data = await response.json();
-
-      if (data.success && data.portalUrl) {
-        // Redirect to Stripe Billing Portal
-        window.location.href = data.portalUrl;
-      } else {
-        throw new Error(data.message || 'Failed to access billing portal');
-      }
-    } catch (error) {
-      console.error('Billing portal error:', error);
-      setError(error.message || 'Failed to access billing portal');
-    } finally {
-      setIsLoading(false);
+    if (data.success && data.portalUrl) {
+      window.location.href = data.portalUrl; // ✅ Stripe Billing Portal
+    } else {
+      throw new Error(data.message || 'Failed to access billing portal');
     }
-  };
+  } catch (error) {
+    console.error('Billing portal error:', error);
+    setError(error.message || 'Failed to access billing portal');
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   // Check if user is on Pro plan (either from user object or subscription status)
   const isProUser = user?.plan === 'pro' || 
