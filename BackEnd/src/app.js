@@ -178,7 +178,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/reviews', reviewRoutes); // This handles /api/reviews/history
-
+app.use('/api/payments', paymentRoutes);
 // Catch-all for undefined routes
 app.use('*', (req, res) => {
   res.status(404).json({
