@@ -1,4 +1,4 @@
-// src/config/passport.js - FIXED VERSION
+// src/config/passport.js - FIXED VERSION with new column names
 const GitHubStrategy = require('passport-github2').Strategy;
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
@@ -76,7 +76,7 @@ module.exports = function(passport) {
         console.log('Existing user authenticated:', updatedUser.id);
         return done(null, updatedUser);
       } else {
-        // Create new user - using direct insert with service key
+        // FIXED: Create new user with new column names
         const newUserData = {
           github_id: profile.id,
           username: profile.username,
@@ -84,7 +84,8 @@ module.exports = function(passport) {
           name: profile.displayName || profile.username,
           avatar_url: profile.photos?.[0]?.value || null,
           github_profile_url: profile.profileUrl,
-          plan: 'free',
+          subscription_tier: 'free',  // FIXED: Changed from 'plan'
+          subscription_status: 'inactive',  // FIXED: Added new field
           credits_used: 0,
           credits_limit: 100,
           last_login: new Date().toISOString(),
@@ -115,7 +116,7 @@ module.exports = function(passport) {
     }
   }));
 
-  // JWT Strategy with proper error handling and validation
+  // FIXED: JWT Strategy with new column names
   passport.use(new JwtStrategy({
     jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
     secretOrKey: process.env.JWT_SECRET,
@@ -148,7 +149,7 @@ module.exports = function(passport) {
 
       console.log('JWT Strategy - Looking up user ID:', userId);
 
-      // Get user from database
+      // FIXED: Get user from database with new column names
       const { data: user, error } = await supabase
         .from('users')
         .select(`
@@ -158,10 +159,16 @@ module.exports = function(passport) {
           email,
           name,
           avatar_url,
-          plan,
+          bio,
+          github_profile_url,
+          subscription_tier,
+          subscription_status,
+          stripe_customer_id,
           credits_used,
           credits_limit,
+          is_active,
           created_at,
+          updated_at,
           last_login
         `)
         .eq('id', userId)
@@ -179,6 +186,12 @@ module.exports = function(passport) {
       if (!user) {
         console.error('JWT Strategy - No user data returned');
         return done(null, false, { message: 'User data not found' });
+      }
+
+      // Check if user is active
+      if (user.is_active === false) {
+        console.error('JWT Strategy - User account deactivated:', userId);
+        return done(null, false, { message: 'Account deactivated' });
       }
 
       console.log('JWT Strategy - User authenticated:', user.id);
@@ -204,14 +217,32 @@ module.exports = function(passport) {
     done(null, user.id);
   });
 
-  // Deserialize user from session
+  // FIXED: Deserialize user with new column names
   passport.deserializeUser(async (id, done) => {
     try {
       console.log('Deserializing user ID:', id);
       
       const { data: user, error } = await supabase
         .from('users')
-        .select('*')
+        .select(`
+          id,
+          github_id,
+          username,
+          email,
+          name,
+          avatar_url,
+          bio,
+          github_profile_url,
+          subscription_tier,
+          subscription_status,
+          stripe_customer_id,
+          credits_used,
+          credits_limit,
+          is_active,
+          created_at,
+          updated_at,
+          last_login
+        `)
         .eq('id', id)
         .single();
 
