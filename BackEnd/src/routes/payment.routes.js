@@ -138,9 +138,6 @@ router.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// @route   GET /api/payments/subscription-status
-// @desc    Get user's subscription status
-// @access  Private
 router.get('/subscription-status', async (req, res) => {
   try {
     console.log('=== Get Subscription Status ===');
@@ -154,18 +151,20 @@ router.get('/subscription-status', async (req, res) => {
       });
     }
 
-    // Get user with subscription info
+    // FIXED: Get user with subscription info - removed 'plan' column
     const { data: user, error } = await supabase
       .from('users')
-      .select('stripe_customer_id, subscription_status, subscription_tier, plan')
+      .select('stripe_customer_id, subscription_status, subscription_tier')
       .eq('id', req.user.id)
       .single();
 
     if (error || !user) {
+      console.error('❌ User not found:', error);
       return res.status(404).json({
         success: false,
         message: 'User not found',
-        error: 'USER_NOT_FOUND'
+        error: 'USER_NOT_FOUND',
+        details: error?.message
       });
     }
 
@@ -190,6 +189,16 @@ router.get('/subscription-status', async (req, res) => {
             currentPeriodEnd: stripeSubscription.current_period_end * 1000,
             cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end
           };
+
+          // Update database with latest info from Stripe
+          await supabase
+            .from('users')
+            .update({
+              subscription_status: stripeSubscription.status,
+              subscription_tier: stripeSubscription.status === 'active' ? 'pro' : 'free',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', req.user.id);
         }
       } catch (stripeError) {
         console.warn('⚠️ Could not fetch Stripe subscription:', stripeError.message);
@@ -200,9 +209,11 @@ router.get('/subscription-status', async (req, res) => {
     if (!subscription) {
       subscription = {
         status: user.subscription_status || 'inactive',
-        tier: user.subscription_tier || user.plan || 'free'
+        tier: user.subscription_tier || 'free'
       };
     }
+
+    console.log('✅ Subscription status retrieved:', subscription);
 
     res.json({
       success: true,
@@ -219,7 +230,6 @@ router.get('/subscription-status', async (req, res) => {
     });
   }
 });
-
 // @route   GET /api/payments/billing-portal
 // @desc    Create Stripe billing portal session
 // @access  Private

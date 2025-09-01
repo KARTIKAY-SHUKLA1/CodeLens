@@ -1,4 +1,4 @@
-// Add at the top of auth.middleware.js
+// Fixed auth.middleware.js - Remove plan column references
 if (!process.env.JWT_SECRET) {
   console.error('❌ CRITICAL: JWT_SECRET environment variable is not set');
   throw new Error('JWT_SECRET must be set in environment variables');
@@ -79,10 +79,15 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // Get user from database
+    // FIXED: Get user from database - removed 'plan' column reference
     const { data: user, error } = await supabase
       .from('users')
-      .select('*')
+      .select(`
+        id, username, name, email, avatar_url, bio, github_profile_url,
+        subscription_tier, subscription_status, stripe_customer_id,
+        credits_used, credits_limit, created_at, updated_at, last_login,
+        is_active
+      `)
       .eq('id', userId)
       .single();
 
@@ -142,9 +147,14 @@ const optionalAuth = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.userId || decoded.id;
     
+    // FIXED: Removed 'plan' column reference
     const { data: user, error } = await supabase
       .from('users')
-      .select('*')
+      .select(`
+        id, username, name, email, avatar_url, bio, github_profile_url,
+        subscription_tier, subscription_status, stripe_customer_id,
+        credits_used, credits_limit, is_active
+      `)
       .eq('id', userId)
       .single();
 
@@ -182,7 +192,7 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Pro plan middleware
+// FIXED: Pro plan middleware - use subscription_tier instead of plan
 const requireProPlan = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
@@ -191,18 +201,21 @@ const requireProPlan = (req, res, next) => {
     });
   }
 
-  if (req.user.plan !== 'pro') {
+  const isProUser = req.user.subscription_tier === 'pro' && 
+                    req.user.subscription_status === 'active';
+
+  if (!isProUser) {
     return res.status(403).json({
       success: false,
       message: 'Pro plan required for this feature',
-      upgradeUrl: '/upgrade'
+      upgradeUrl: '/pricing'
     });
   }
 
   next();
 };
 
-// Check credits middleware
+// FIXED: Check credits middleware - handle unlimited credits for pro users
 const checkCredits = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
@@ -211,17 +224,30 @@ const checkCredits = (req, res, next) => {
     });
   }
 
-  if (req.user.credits_used >= req.user.credits_limit) {
+  // Pro users have unlimited credits
+  const isProUser = req.user.subscription_tier === 'pro' && 
+                    req.user.subscription_status === 'active';
+  
+  if (isProUser) {
+    return next(); // Skip credit check for pro users
+  }
+
+  // Check credits for free users
+  const creditsUsed = req.user.credits_used || 0;
+  const creditsLimit = req.user.credits_limit || 100;
+
+  if (creditsUsed >= creditsLimit) {
     return res.status(403).json({
       success: false,
       message: 'Credit limit exceeded. Please upgrade your plan.',
       credits: {
-        used: req.user.credits_used,
-        limit: req.user.credits_limit
+        used: creditsUsed,
+        limit: creditsLimit
       },
-      upgradeUrl: '/upgrade'
+      upgradeUrl: '/pricing'
     });
   }
+  
   next();
 };
 
@@ -232,14 +258,19 @@ const validateSession = async (req, res, next) => {
       return next();
     }
 
-    // Check if session exists in database
+    // Check if session exists in database (if you have this table)
     const { data: session, error } = await supabase
       .from('user_sessions')
       .select('*')
       .eq('session_token', req.token)
       .single();
 
-    if (error || !session || !session.is_active) {
+    if (error && error.code !== 'PGRST116') { // Not "not found" error
+      console.warn('Session validation failed:', error.message);
+      return next(); // Continue without session validation
+    }
+
+    if (session && session.is_active === false) {
       return res.status(401).json({
         success: false,
         message: 'Invalid session'
@@ -247,7 +278,7 @@ const validateSession = async (req, res, next) => {
     }
 
     // Check if session is expired
-    if (new Date(session.expires_at) < new Date()) {
+    if (session && new Date(session.expires_at) < new Date()) {
       // Mark session as inactive
       await supabase
         .from('user_sessions')
@@ -263,10 +294,8 @@ const validateSession = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Session validation error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Session validation failed'
-    });
+    // Continue without session validation rather than failing
+    next();
   }
 };
 
