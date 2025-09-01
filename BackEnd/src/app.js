@@ -262,7 +262,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/reviews', reviewRoutes);
-app.use('/api/payment', paymentRoutes); // NEW: Payment routes
+app.use('/api/payments', paymentRoutes); // NEW: Payment routes
 
 // Catch-all for undefined routes
 app.use('*', (req, res) => {
