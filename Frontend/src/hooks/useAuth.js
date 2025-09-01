@@ -1,21 +1,67 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_ENDPOINTS, getUserProfile, updateUserPreferences, apiCall } from '../config/api';
 
 function useAuth() {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
-  const [initialized, setInitialized] = useState(false); // NEW: Prevent multiple initializations
+  const [initialized, setInitialized] = useState(false);
+  
+  // Use ref to prevent multiple simultaneous requests
+  const isFetching = useRef(false);
+  const authFailureCount = useRef(0);
+  const MAX_AUTH_FAILURES = 3;
 
-  // FIXED: Memoized fetchUserProfile to prevent infinite loops
+  // Token validation helper
+  const isTokenValid = useCallback((token) => {
+    if (!token) return false;
+    
+    try {
+      // Check if JWT token and not expired
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.exp * 1000 > Date.now();
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Clear all authentication data
+  const clearAuthData = useCallback(() => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('token'); // Also clear 'token' if it exists
+    localStorage.removeItem('user_data');
+    setUser(null);
+    setShowWelcome(false);
+    isFetching.current = false;
+  }, []);
+
+  // FIXED: Simplified fetchUserProfile without circular dependencies
   const fetchUserProfile = useCallback(async () => {
+    // Prevent multiple simultaneous fetches
+    if (isFetching.current || isLoading) {
+      console.log('Already fetching user profile, skipping...');
+      return;
+    }
+
     const token = localStorage.getItem('auth_token');
-    if (!token || isLoading) return;
+    if (!token) {
+      setInitialized(true);
+      return;
+    }
+
+    // Validate token before making request
+    if (!isTokenValid(token)) {
+      console.log('Token is expired or invalid, clearing auth data');
+      clearAuthData();
+      setInitialized(true);
+      return;
+    }
+
+    isFetching.current = true;
+    setIsLoading(true);
 
     try {
-      setIsLoading(true);
       console.log('Fetching user profile...');
-      
       const response = await getUserProfile();
       console.log('User profile response:', response);
       
@@ -24,6 +70,9 @@ function useAuth() {
       if (userData && userData.id) {
         setUser(userData);
         console.log('User set successfully:', userData.id);
+        
+        // Reset failure count on success
+        authFailureCount.current = 0;
         
         // Show welcome modal for new users
         if (userData.isNewUser) {
@@ -36,45 +85,61 @@ function useAuth() {
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
       
-      // Only clear tokens if it's an auth error (401/403)
-      if (error.message.includes('Authentication required') || 
-          error.message.includes('Invalid token') ||
-          error.message.includes('401') ||
-          error.message.includes('403')) {
-        console.log('Clearing invalid auth data');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user_data');
-        setUser(null);
+      // Increment failure count
+      authFailureCount.current++;
+      
+      // Check if it's an auth error
+      const isAuthError = error.message.includes('Authentication required') || 
+                         error.message.includes('Invalid token') ||
+                         error.message.includes('401') ||
+                         error.message.includes('403') ||
+                         error.status === 401 ||
+                         error.status === 403;
+      
+      if (isAuthError || authFailureCount.current >= MAX_AUTH_FAILURES) {
+        console.log('Clearing invalid auth data due to auth failure or max attempts');
+        clearAuthData();
+        
+        // Prevent infinite loops by redirecting after max failures
+        if (authFailureCount.current >= MAX_AUTH_FAILURES) {
+          console.log('Max auth failures reached, redirecting to login');
+          window.location.href = '/login';
+          return;
+        }
       }
     } finally {
       setIsLoading(false);
-      setInitialized(true); // Mark as initialized
+      setInitialized(true);
+      isFetching.current = false;
     }
-  }, [isLoading]); // Only depend on isLoading
+  }, [isTokenValid, clearAuthData, isLoading]);
 
-  // FIXED: Only run once on mount with proper cleanup
+  // FIXED: Simplified useEffect without circular dependencies
   useEffect(() => {
-    if (initialized) return; // Prevent re-initialization
+    if (initialized || isFetching.current) return;
+    
+    console.log('useAuth useEffect - initializing...');
     
     const token = localStorage.getItem('auth_token');
     console.log('useAuth useEffect - token exists:', !!token);
     
-    if (token && !user) {
+    if (token) {
       fetchUserProfile();
     } else {
       setInitialized(true);
     }
-  }, [fetchUserProfile, initialized, user]);
+  }, [initialized]); // Only depend on initialized flag
 
   // Refresh user data (called after OAuth success)
   const refreshUser = useCallback(() => {
     const token = localStorage.getItem('auth_token');
     console.log('Refreshing user, token exists:', !!token);
-    if (token && !isLoading) {
+    
+    if (token && !isFetching.current) {
       setInitialized(false); // Allow re-fetch
-      fetchUserProfile();
+      authFailureCount.current = 0; // Reset failure count
     }
-  }, [fetchUserProfile, isLoading]);
+  }, []);
 
   // GitHub OAuth Sign In
   const signIn = async () => {
@@ -91,7 +156,14 @@ function useAuth() {
 
   // Handle OAuth callback
   const handleAuthCallback = async (code, state = null) => {
+    if (isFetching.current) {
+      console.log('Auth callback already in progress, skipping...');
+      return;
+    }
+
     setIsLoading(true);
+    isFetching.current = true;
+
     try {
       console.log('Handling auth callback with code:', code ? 'present' : 'missing');
       
@@ -112,6 +184,7 @@ function useAuth() {
         }
         
         console.log('Authentication successful for user:', response.user.id);
+        authFailureCount.current = 0; // Reset failure count
         return response;
       } else {
         throw new Error('Invalid response format from server');
@@ -119,18 +192,21 @@ function useAuth() {
       
     } catch (error) {
       console.error('Auth callback error:', error);
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_data');
-      setUser(null);
+      clearAuthData();
       throw error;
     } finally {
       setIsLoading(false);
       setInitialized(true);
+      isFetching.current = false;
     }
   };
 
   // Sign Out
   const signOut = async () => {
+    if (isFetching.current) return;
+    
+    isFetching.current = true;
+    
     try {
       const token = localStorage.getItem('auth_token');
       if (token) {
@@ -145,11 +221,9 @@ function useAuth() {
     } catch (error) {
       console.error('Sign out error:', error);
     } finally {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_data');
-      setUser(null);
-      setShowWelcome(false);
+      clearAuthData();
       setInitialized(false);
+      authFailureCount.current = 0;
     }
   };
 
@@ -196,6 +270,9 @@ function useAuth() {
   };
 
   const setUserData = (userData, token = null) => {
+    console.log('DEBUG: setUserData exists?', typeof setUserData);
+    console.log('DEBUG: user exists?', !!userData);
+    
     if (!userData) {
       console.warn('setUserData called with null/undefined userData');
       return;

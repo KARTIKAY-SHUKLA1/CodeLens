@@ -1,4 +1,4 @@
-// src/config/api.js - UPDATED VERSION with Profile History Fix
+// src/config/api.js - FIXED VERSION
 // API Configuration for Frontend
 
 // Use production URL
@@ -6,7 +6,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 console.log('API Base URL:', API_BASE_URL);
 
-// API endpoints - Updated with new history endpoint
+// API endpoints
 export const API_ENDPOINTS = {
   // AI Analysis endpoints
   ANALYZE_CODE: `${API_BASE_URL}/api/ai/analyze`,
@@ -14,16 +14,16 @@ export const API_ENDPOINTS = {
   GET_LANGUAGES: `${API_BASE_URL}/api/ai/languages`,
   DETECT_LANGUAGE: `${API_BASE_URL}/api/ai/detect-language`,
   
-  // Review endpoints - UPDATED with history endpoint
+  // Review endpoints
   GET_REVIEWS: `${API_BASE_URL}/api/reviews`,
-  GET_REVIEW_HISTORY: `${API_BASE_URL}/api/reviews/history`, // NEW: For Profile page
-  GET_REVIEW_STATS: `${API_BASE_URL}/api/reviews/stats`, // For analytics
+  GET_REVIEW_HISTORY: `${API_BASE_URL}/api/reviews/history`,
+  GET_REVIEW_STATS: `${API_BASE_URL}/api/reviews/stats`,
   CREATE_REVIEW: `${API_BASE_URL}/api/reviews`,
   UPDATE_REVIEW: `${API_BASE_URL}/api/reviews`,
   DELETE_REVIEW: `${API_BASE_URL}/api/reviews`,
   GET_PUBLIC_REVIEWS: `${API_BASE_URL}/api/reviews/public`,
-  ANALYZE_REVIEW: `${API_BASE_URL}/api/reviews`, // /:id/analyze
-  TOGGLE_FAVORITE: `${API_BASE_URL}/api/reviews`, // /:id/favorite
+  ANALYZE_REVIEW: `${API_BASE_URL}/api/reviews`,
+  TOGGLE_FAVORITE: `${API_BASE_URL}/api/reviews`,
   INCREMENT_USAGE: `${API_BASE_URL}/api/reviews/increment`,
   
   // Auth endpoints
@@ -37,11 +37,10 @@ export const API_ENDPOINTS = {
   GET_PROFILE: `${API_BASE_URL}/api/users/profile`,
   UPDATE_PREFERENCES: `${API_BASE_URL}/api/users/preferences`,
   UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
-  GET_DASHBOARD: `${API_BASE_URL}/api/reviews/stats`,
+  GET_DASHBOARD: `${API_BASE_URL}/api/users/dashboard`,
   GET_ACTIVITY: `${API_BASE_URL}/api/users/activity`,
-  GET_USER_HISTORY: `${API_BASE_URL}/api/reviews/history`,
+  GET_USER_HISTORY: `${API_BASE_URL}/api/users/history`,
   UPGRADE_PLAN: `${API_BASE_URL}/api/users/upgrade`,
-
   
   // Payment endpoints
   CREATE_CHECKOUT_SESSION: `${API_BASE_URL}/api/payments/create-checkout-session`,
@@ -52,28 +51,41 @@ export const API_ENDPOINTS = {
   HEALTH: `${API_BASE_URL}/health`
 };
 
-// Token management functions
+// FIXED: Simplified token management - use only 'auth_token'
 const getAuthToken = () => {
-  return localStorage.getItem('auth_token') || localStorage.getItem('token');
+  return localStorage.getItem('auth_token');
 };
 
 const setAuthToken = (token) => {
   if (token) {
     localStorage.setItem('auth_token', token);
-    localStorage.setItem('token', token);
     console.log('Token stored successfully');
   }
 };
 
 const clearAuthToken = () => {
   localStorage.removeItem('auth_token');
-  localStorage.removeItem('token');
+  localStorage.removeItem('token'); // Clean up any legacy tokens
   localStorage.removeItem('user_data');
   localStorage.removeItem('user');
   console.log('Tokens cleared');
 };
 
-// IMPROVED API call function with better error handling
+// FIXED: Token validation helper
+const isTokenValid = (token) => {
+  if (!token) return false;
+  
+  try {
+    // For JWT tokens, check expiration
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp * 1000 > Date.now();
+  } catch {
+    // For non-JWT tokens, assume valid if exists
+    return true;
+  }
+};
+
+// FIXED: Improved API call function with proper error handling
 export const apiCall = async (endpoint, options = {}) => {
   const token = getAuthToken();
   
@@ -93,18 +105,18 @@ export const apiCall = async (endpoint, options = {}) => {
     
     const response = await fetch(endpoint, defaultOptions);
     
-    console.log(`📡 Response [${response.status}]:`, response.statusText || '');
+    console.log(`📡 Response [${response.status}]:`, response.statusText);
     
     // Handle different status codes
     if (response.status === 401) {
-      console.warn('Authentication failed - clearing tokens');
+      console.log('Authentication failed - clearing tokens');
       clearAuthToken();
       throw new Error('Authentication required. Please sign in again.');
     }
     
     if (response.status === 404) {
-      console.error(`💥 Endpoint not found: ${endpoint}`);
-      throw new Error(`API endpoint not found: ${response.status}`);
+      console.error(`Endpoint not found: ${endpoint}`);
+      throw new Error('API endpoint not found');
     }
 
     if (response.status === 403) {
@@ -121,14 +133,14 @@ export const apiCall = async (endpoint, options = {}) => {
       let errorData;
       try {
         errorData = await response.json();
-        console.error(`💥 API Error [${response.status}]:`, errorData);
+        console.error(`API Error [${response.status}]:`, errorData);
       } catch (e) {
         const errorText = await response.text();
-        console.error(`💥 API Error [${response.status}]:`, errorText);
+        console.error(`API Error [${response.status}]:`, errorText);
         errorData = { message: errorText || `HTTP ${response.status}` };
       }
       
-      throw new Error(errorData.message || errorData.error || `API Error: ${response.status} ${response.statusText}`);
+      throw new Error(errorData.message || errorData.error || `API Error: ${response.status}`);
     }
 
     const data = await response.json();
@@ -140,7 +152,7 @@ export const apiCall = async (endpoint, options = {}) => {
     
     // Network errors
     if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-      throw new Error('Network error. Please check your internet connection and try again.');
+      throw new Error('Network error. Please check your internet connection.');
     }
     
     throw error;
@@ -170,7 +182,7 @@ export const analyzeCode = async (code, language, options = {}) => {
   }
 };
 
-// NEW: Review history functions for Profile page
+// Review history functions
 export const getReviewHistory = async (page = 1, limit = 50) => {
   try {
     console.log('Fetching review history...');
@@ -250,7 +262,7 @@ export const incrementReviewUsage = async () => {
   });
 };
 
-// User profile functions
+// User preferences function - FIXED to handle backend response structure
 export const updateUserPreferences = async (preferences) => {
   try {
     console.log('Saving user preferences...');
@@ -266,14 +278,20 @@ export const updateUserPreferences = async (preferences) => {
   }
 };
 
-// Authentication function
+// Authentication function - FIXED
 export const authenticateUser = async (token) => {
   try {
+    // Validate token before storing
+    if (!isTokenValid(token)) {
+      throw new Error('Invalid or expired token');
+    }
+    
     const response = await apiCall(API_ENDPOINTS.VERIFY_TOKEN, {
       method: 'POST',
       body: JSON.stringify({ token }),
     });
     
+    // Handle the response structure from your backend
     const userData = response.user || response;
     
     if (userData && userData.id) {
@@ -291,16 +309,44 @@ export const authenticateUser = async (token) => {
   }
 };
 
-// Get current user function
+// FIXED: Get user profile function to handle backend response structure
+export const getUserProfile = async () => {
+  try {
+    console.log('Fetching user profile...');
+    const response = await apiCall(API_ENDPOINTS.GET_PROFILE);
+    
+    // Your backend returns { success: true, user: {...}, statistics: {...} }
+    if (response.success && response.user) {
+      const userData = response.user;
+      localStorage.setItem('user_data', JSON.stringify(userData));
+      console.log('User profile retrieved successfully');
+      return userData;
+    }
+    
+    // Fallback for direct user data response
+    if (response.id) {
+      localStorage.setItem('user_data', JSON.stringify(response));
+      return response;
+    }
+    
+    throw new Error('No user data received');
+  } catch (error) {
+    console.error('Failed to fetch user profile:', error);
+    throw error;
+  }
+};
+
+// Get current user function - FIXED
 export const getCurrentUser = async () => {
   try {
     const response = await apiCall(API_ENDPOINTS.GET_PROFILE);
     
-    const userData = response.user || response;
+    // Handle your backend's response structure
+    const userData = response.success ? response.user : response;
     
-    if (userData) {
+    if (userData && userData.id) {
       localStorage.setItem('user_data', JSON.stringify(userData));
-      console.log('User profile retrieved');
+      console.log('Current user retrieved');
       return userData;
     }
     
@@ -311,17 +357,6 @@ export const getCurrentUser = async () => {
         error.message.includes('Invalid token')) {
       clearAuthToken();
     }
-    throw error;
-  }
-};
-
-// User profile functions
-export const getUserProfile = async () => {
-  try {
-    const response = await apiCall(API_ENDPOINTS.GET_PROFILE);
-    return response;
-  } catch (error) {
-    console.error('Failed to fetch user profile:', error);
     throw error;
   }
 };
@@ -340,7 +375,6 @@ export const getUserDashboard = async () => {
 export const getUserActivity = async (page = 1, limit = 20) => {
   return await apiCall(`${API_ENDPOINTS.GET_ACTIVITY}?page=${page}&limit=${limit}`);
 };
-
 
 export const getUserHistory = async (page = 1, limit = 20) => {
   return await apiCall(`${API_ENDPOINTS.GET_USER_HISTORY}?page=${page}&limit=${limit}`);
@@ -398,16 +432,16 @@ export default {
   updateUserProfile,
   getUserDashboard,
   getUserActivity,
-  getReviewHistory,        // NEW
-  getReviewStats,          // NEW
-  getReviews,              // ENHANCED
-  createReview,            // NEW
-  updateReview,            // NEW
-  deleteReview,            // NEW
-  analyzeReview,           // NEW
-  toggleFavorite,          // NEW
-  getPublicReviews,        // NEW
-  incrementReviewUsage,    // NEW
+  getReviewHistory,
+  getReviewStats,
+  getReviews,
+  createReview,
+  updateReview,
+  deleteReview,
+  analyzeReview,
+  toggleFavorite,
+  getPublicReviews,
+  incrementReviewUsage,
   logoutUser,
   checkHealth,
   getAuthToken,
